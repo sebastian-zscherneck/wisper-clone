@@ -213,6 +213,10 @@ func makeTemporaryAudioFile(contents: String) throws -> URL {
     return url
 }
 
+func makeStubbedEndpoint() -> URL {
+    URL(string: "https://stub.invalid/\(UUID().uuidString)")!
+}
+
 func makeStubbedSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [StubURLProtocol.self]
@@ -220,7 +224,22 @@ func makeStubbedSession() -> URLSession {
 }
 
 final class StubURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var response: (data: Data, statusCode: Int)?
+    // Responses are keyed by request URL so parallel tests never race on
+    // shared stub state — each test registers its own unique endpoint.
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var responses: [URL: (data: Data, statusCode: Int)] = [:]
+
+    static func setResponse(_ response: (data: Data, statusCode: Int), for url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        responses[url] = response
+    }
+
+    private static func response(for url: URL) -> (data: Data, statusCode: Int)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return responses[url]
+    }
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -231,7 +250,7 @@ final class StubURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        guard let response = Self.response, let url = request.url else {
+        guard let url = request.url, let response = Self.response(for: url) else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
         }

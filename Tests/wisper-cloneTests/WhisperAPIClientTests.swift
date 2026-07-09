@@ -37,11 +37,12 @@ import Testing
 }
 
 @Test func openAITranscriptionClient_parsesSuccessfulTranscriptionResponse() async throws {
-    StubURLProtocol.response = (
-        data: Data(#"{"text":"Hello from Whisper Flow."}"#.utf8),
-        statusCode: 200
+    let endpoint = makeStubbedEndpoint()
+    StubURLProtocol.setResponse(
+        (data: Data(#"{"text":"Hello from Whisper Flow."}"#.utf8), statusCode: 200),
+        for: endpoint
     )
-    let client = OpenAITranscriptionClient(session: makeStubbedSession())
+    let client = OpenAITranscriptionClient(endpoint: endpoint, session: makeStubbedSession())
     let audioURL = try makeTemporaryAudioFile(contents: "audio")
     defer { try? FileManager.default.removeItem(at: audioURL) }
 
@@ -56,11 +57,12 @@ import Testing
 }
 
 @Test func openAITranscriptionClient_throwsTranscriptionErrorMessageFromAPIErrorPayload() async throws {
-    StubURLProtocol.response = (
-        data: Data(#"{"error":{"message":"Invalid API key"}}"#.utf8),
-        statusCode: 401
+    let endpoint = makeStubbedEndpoint()
+    StubURLProtocol.setResponse(
+        (data: Data(#"{"error":{"message":"Invalid API key"}}"#.utf8), statusCode: 401),
+        for: endpoint
     )
-    let client = OpenAITranscriptionClient(session: makeStubbedSession())
+    let client = OpenAITranscriptionClient(endpoint: endpoint, session: makeStubbedSession())
     let audioURL = try makeTemporaryAudioFile(contents: "audio")
     defer { try? FileManager.default.removeItem(at: audioURL) }
 
@@ -73,11 +75,12 @@ import Testing
 }
 
 @Test func openAITranscriptionClient_rejectsMissingAudioFileBeforeRequest() async throws {
-    StubURLProtocol.response = (
-        data: Data(#"{"text":"unused"}"#.utf8),
-        statusCode: 200
+    let endpoint = makeStubbedEndpoint()
+    StubURLProtocol.setResponse(
+        (data: Data(#"{"text":"unused"}"#.utf8), statusCode: 200),
+        for: endpoint
     )
-    let client = OpenAITranscriptionClient(session: makeStubbedSession())
+    let client = OpenAITranscriptionClient(endpoint: endpoint, session: makeStubbedSession())
     let missingURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("wisper-clone-missing-\(UUID().uuidString)")
         .appendingPathExtension("m4a")
