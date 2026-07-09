@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 
 @MainActor
@@ -64,6 +65,20 @@ final class DictationCoordinator: ObservableObject {
         inputDevices = self.audioRecorder.availableInputDevices()
         configureHotkey()
         notifier.requestPermission()
+
+        // Register for device hot-plug notifications
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(audioDeviceConnected),
+            name: AVCaptureDevice.wasConnectedNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(audioDeviceDisconnected),
+            name: AVCaptureDevice.wasDisconnectedNotification,
+            object: nil
+        )
     }
 
     func start() {
@@ -296,5 +311,15 @@ final class DictationCoordinator: ObservableObject {
     private func openSettings(_ urlString: String) {
         guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    @objc
+    private func audioDeviceConnected() {
+        refreshInputDevices()
+    }
+
+    @objc
+    private func audioDeviceDisconnected() {
+        refreshInputDevices()
     }
 }

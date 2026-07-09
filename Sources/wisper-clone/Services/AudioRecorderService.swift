@@ -171,7 +171,7 @@ final class AudioRecorderService: NSObject, AudioRecording, AVCaptureFileOutputR
 
     private func inputCaptureDevices() -> [AVCaptureDevice] {
         let discoverySession = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.microphone],
+            deviceTypes: [.microphone, .external, .continuityCamera],
             mediaType: .audio,
             position: .unspecified
         )
