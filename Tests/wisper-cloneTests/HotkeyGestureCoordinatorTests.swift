@@ -3,6 +3,36 @@ import Testing
 @testable import wisper_clone
 
 @MainActor
+@Test func dictationFlow_finishRecordingResetsHandsFreeFlag() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "test audio")
+    let recorder = SpyRecorder(recordedFileURL: audioURL)
+    let transcriber = SpyTranscriptionClient(result: "test result")
+    let pasteboard = SpyPasteboard()
+    let hotkeyManager = HotkeyManager(hotkeys: [.fn])
+    let coordinator = makeCoordinator(
+        recorder: recorder,
+        transcriber: transcriber,
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        hotkeyManager: hotkeyManager
+    )
+
+    hotkeyManager.onPress?()
+    try await expectPhase(.recording, in: coordinator)
+
+    hotkeyManager.onDoubleTap?()
+    #expect(coordinator.isHandsFreeActive)
+
+    // Directly call finishRecording() (simulating popover Stop button)
+    // should reset the hands-free flag, not leave it stuck true
+    coordinator.finishRecording()
+    try await expectPhase(.idle, in: coordinator)
+
+    #expect(!coordinator.isHandsFreeActive)
+    #expect(pasteboard.pastedTexts == ["test result"])
+}
+
+@MainActor
 @Test func dictationFlow_doubleTapLocksHandsFreeUntilNextPress() async throws {
     let audioURL = try makeTemporaryAudioFile(contents: "hands-free audio")
     let recorder = SpyRecorder(recordedFileURL: audioURL)

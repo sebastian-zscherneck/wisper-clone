@@ -160,6 +160,7 @@ final class DictationCoordinator: ObservableObject {
 
     func finishRecording() {
         guard phase == .recording else { return }
+        isHandsFreeActive = false
 
         phase = .transcribing
         statusText = "Transcribing..."
@@ -275,7 +276,6 @@ final class DictationCoordinator: ObservableObject {
         hotkeyManager.onPress = { [weak self] in
             guard let self else { return }
             if isHandsFreeActive, phase == .recording {
-                isHandsFreeActive = false
                 finishRecording()
             } else {
                 beginRecording()

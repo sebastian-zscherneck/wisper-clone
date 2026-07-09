@@ -115,11 +115,11 @@ final class HotkeyManager {
         // tap callback both see the event, and it also still reaches the frontmost app —
         // an accepted limitation.
         if event.type == .keyDown {
-            if event.keyCode == UInt16(kVK_Escape) {
+            if event.keyCode == UInt16(kVK_Escape), event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
                 onEscape?()
                 return
             }
-            if event.keyCode == UInt16(kVK_ANSI_V), event.modifierFlags.contains([.command, .control]) {
+            if event.keyCode == UInt16(kVK_ANSI_V), event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [.command, .control] {
                 onPasteLastShortcut?()
                 return
             }
@@ -160,11 +160,12 @@ final class HotkeyManager {
         case .keyDown, .keyUp:
             // Escape/paste-last are handled as plain keyDown only (no release tracking needed).
             if type == .keyDown {
-                if keyCode == Int64(kVK_Escape) {
+                if keyCode == Int64(kVK_Escape), !flags.contains(.maskCommand), !flags.contains(.maskControl), !flags.contains(.maskAlternate), !flags.contains(.maskShift) {
                     onEscape?()
                     return
                 }
-                if keyCode == Int64(kVK_ANSI_V), flags.contains([.maskCommand, .maskControl]) {
+                let deviceIndependentFlags = flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
+                if keyCode == Int64(kVK_ANSI_V), deviceIndependentFlags == [.maskCommand, .maskControl] {
                     onPasteLastShortcut?()
                     return
                 }
