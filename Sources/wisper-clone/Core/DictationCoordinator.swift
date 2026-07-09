@@ -32,6 +32,8 @@ final class DictationCoordinator: ObservableObject {
     private let personalDictionaryStore: PersonalDictionaryStore
     private let preferencesStore: AppPreferencesStoring
     private var pasteTargetApplication: NSRunningApplication?
+    nonisolated(unsafe) private var deviceConnectedObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var deviceDisconnectedObserver: NSObjectProtocol?
 
     init(
         audioRecorder: AudioRecording = AudioRecorderService(),
@@ -66,19 +68,34 @@ final class DictationCoordinator: ObservableObject {
         configureHotkey()
         notifier.requestPermission()
 
-        // Register for device hot-plug notifications
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(audioDeviceConnected),
-            name: AVCaptureDevice.wasConnectedNotification,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(audioDeviceDisconnected),
-            name: AVCaptureDevice.wasDisconnectedNotification,
-            object: nil
-        )
+        // Register for device hot-plug notifications with explicit MainActor hopping
+        deviceConnectedObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.wasConnectedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshInputDevices()
+            }
+        }
+        deviceDisconnectedObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.wasDisconnectedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshInputDevices()
+            }
+        }
+    }
+
+    deinit {
+        if let observer = deviceConnectedObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = deviceDisconnectedObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func start() {
@@ -311,15 +328,5 @@ final class DictationCoordinator: ObservableObject {
     private func openSettings(_ urlString: String) {
         guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
-    }
-
-    @objc
-    private func audioDeviceConnected() {
-        refreshInputDevices()
-    }
-
-    @objc
-    private func audioDeviceDisconnected() {
-        refreshInputDevices()
     }
 }
