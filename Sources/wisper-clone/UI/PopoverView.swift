@@ -318,12 +318,22 @@ struct PopoverView: View {
             }
 
             List(coordinator.history) { entry in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.text)
-                        .lineLimit(2)
-                    Text(entry.createdAt, style: .time)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(entry.text)
+                            .lineLimit(2)
+                        Text(entry.createdAt, style: .time)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        coordinator.removeHistoryEntry(entry.id)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove entry")
                 }
                 .padding(.vertical, 2)
             }

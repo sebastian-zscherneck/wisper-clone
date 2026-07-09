@@ -8,16 +8,20 @@ enum DictationPhase: Equatable, Sendable {
     case failed
 }
 
-struct TranscriptEntry: Identifiable, Equatable, Sendable {
+struct TranscriptEntry: Identifiable, Equatable, Sendable, Codable {
     let id: UUID
     let text: String
+    let rawText: String
     let createdAt: Date
 
-    init(id: UUID = UUID(), text: String, createdAt: Date = Date()) {
+    init(id: UUID = UUID(), text: String, rawText: String? = nil, createdAt: Date = Date()) {
         self.id = id
         self.text = text
+        self.rawText = rawText ?? text
         self.createdAt = createdAt
     }
+
+    var wasEdited: Bool { rawText != text }
 }
 
 struct AppPreferences: Equatable, Sendable {

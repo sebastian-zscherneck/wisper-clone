@@ -31,6 +31,7 @@ final class DictationCoordinator: ObservableObject {
     private let frontmostApplicationTracker: FrontmostApplicationTracker
     private let personalDictionaryStore: PersonalDictionaryStore
     private let preferencesStore: AppPreferencesStoring
+    private let historyStore: TranscriptHistoryStoring
     private var pasteTargetApplication: NSRunningApplication?
     nonisolated(unsafe) private var deviceConnectedObserver: NSObjectProtocol?
     nonisolated(unsafe) private var deviceDisconnectedObserver: NSObjectProtocol?
@@ -45,7 +46,8 @@ final class DictationCoordinator: ObservableObject {
         hotkeyManager: HotkeyManager = HotkeyManager(hotkeys: [.fn, .mouse5]),
         frontmostApplicationTracker: FrontmostApplicationTracker = FrontmostApplicationTracker(),
         personalDictionaryStore: PersonalDictionaryStore = PersonalDictionaryStore(),
-        preferencesStore: AppPreferencesStoring = UserDefaultsAppPreferencesStore()
+        preferencesStore: AppPreferencesStoring = UserDefaultsAppPreferencesStore(),
+        historyStore: TranscriptHistoryStoring = FileTranscriptHistoryStore()
     ) {
         self.audioRecorder = audioRecorder
         self.transcriptionClient = transcriptionClient
@@ -57,9 +59,11 @@ final class DictationCoordinator: ObservableObject {
         self.frontmostApplicationTracker = frontmostApplicationTracker
         self.personalDictionaryStore = personalDictionaryStore
         self.preferencesStore = preferencesStore
+        self.historyStore = historyStore
 
         hasAPIKey = ((try? credentialStore.readAPIKey()) ?? nil)?.isEmpty == false
         dictionaryTerms = personalDictionaryStore.loadTerms()
+        history = historyStore.loadEntries()
         preferences = preferencesStore.loadPreferences()
         preferences.launchAtLogin = launchAtLoginManager.isEnabled
         self.audioRecorder.selectedInputDeviceID = preferences.selectedInputDeviceID
@@ -192,6 +196,12 @@ final class DictationCoordinator: ObservableObject {
     func clearSessionHistory() {
         history.removeAll()
         lastTranscript = ""
+        historyStore.saveEntries(history)
+    }
+
+    func removeHistoryEntry(_ id: UUID) {
+        history.removeAll { $0.id == id }
+        historyStore.saveEntries(history)
     }
 
     func addDictionaryTerm(_ term: String) {
@@ -291,7 +301,8 @@ final class DictationCoordinator: ObservableObject {
 
             lastTranscript = cleaned
             history.insert(TranscriptEntry(text: cleaned), at: 0)
-            history = Array(history.prefix(20))
+            history = Array(history.prefix(FileTranscriptHistoryStore.maxEntries))
+            historyStore.saveEntries(history)
             await paste(cleaned)
         } catch {
             fail(error)

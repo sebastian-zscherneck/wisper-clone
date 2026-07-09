@@ -165,13 +165,35 @@ final class InMemoryAppPreferencesStore: AppPreferencesStoring {
     }
 }
 
+final class InMemoryTranscriptHistoryStore: TranscriptHistoryStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [TranscriptEntry]
+    private(set) var saveCount = 0
+
+    init(entries: [TranscriptEntry] = []) {
+        self.entries = entries
+    }
+
+    func loadEntries() -> [TranscriptEntry] {
+        lock.withLock { entries }
+    }
+
+    func saveEntries(_ entries: [TranscriptEntry]) {
+        lock.withLock {
+            self.entries = entries
+            saveCount += 1
+        }
+    }
+}
+
 @MainActor
 func makeCoordinator(
     recorder: AudioRecording,
     transcriber: TranscriptionServicing,
     pasteboard: TextPasting,
     credentialStore: CredentialStoring,
-    notifier: UserNotifying = SpyNotifier()
+    notifier: UserNotifying = SpyNotifier(),
+    historyStore: TranscriptHistoryStoring = InMemoryTranscriptHistoryStore()
 ) -> DictationCoordinator {
     DictationCoordinator(
         audioRecorder: recorder,
@@ -181,7 +203,8 @@ func makeCoordinator(
         notifier: notifier,
         launchAtLoginManager: LaunchAtLoginManager(),
         hotkeyManager: HotkeyManager(hotkeys: [.fn, .mouse5]),
-        preferencesStore: InMemoryAppPreferencesStore()
+        preferencesStore: InMemoryAppPreferencesStore(),
+        historyStore: historyStore
     )
 }
 
