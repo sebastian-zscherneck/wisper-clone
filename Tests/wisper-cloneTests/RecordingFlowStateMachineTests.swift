@@ -1,0 +1,88 @@
+import Foundation
+import Testing
+@testable import wisper_clone
+
+@MainActor
+@Test func dictationFlow_recordsTranscribesCleansAndPastes() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
+    let recorder = SpyRecorder(recordedFileURL: audioURL)
+    let transcriber = SpyTranscriptionClient(result: "  hello   world ! \n")
+    let pasteboard = SpyPasteboard()
+    let coordinator = makeCoordinator(
+        recorder: recorder,
+        transcriber: transcriber,
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key")
+    )
+
+    #expect(coordinator.phase == .idle)
+
+    coordinator.beginRecording()
+    try await expectPhase(.recording, in: coordinator)
+    #expect(recorder.events == [.requestPermission, .start])
+
+    coordinator.finishRecording()
+    try await expectPhase(.idle, in: coordinator)
+
+    #expect(recorder.events == [.requestPermission, .start, .stop])
+    #expect(transcriber.requests == [
+        .init(
+            fileURL: audioURL,
+            apiKey: "test-key",
+            prompt: """
+            Transcribe this as polished personal dictation.
+            The speaker may mix German and English, including within the same sentence.
+            Preserve the spoken language and meaning of each phrase; do not translate or add facts.
+            Lightly smooth filler words, repeated words, obvious false starts, and minor spoken disfluencies.
+            Use natural punctuation, capitalization, and short paragraphs for readability.
+            If the speaker lists multiple items, format them as a concise bullet list.
+            Keep short messages short and natural; do not make casual messages overly formal.
+            Keep proper nouns, product names, acronyms, and technical terms exactly when they match the audio.
+            Preferred vocabulary and spellings: n8n; Claude; Sebastian Zscherneck. Use these exact spellings only when they match the audio.
+            """,
+            language: nil
+        )
+    ])
+    #expect(coordinator.lastTranscript == "hello world!")
+    #expect(coordinator.history.map(\.text) == ["hello world!"])
+    #expect(pasteboard.pastedTexts == ["hello world!"])
+}
+
+@MainActor
+@Test func dictationFlow_requiresAPIKeyBeforeRecording() async throws {
+    let recorder = SpyRecorder(recordedFileURL: URL(filePath: "/tmp/not-used.m4a"))
+    let notifier = SpyNotifier()
+    let coordinator = makeCoordinator(
+        recorder: recorder,
+        transcriber: SpyTranscriptionClient(result: "unused"),
+        pasteboard: SpyPasteboard(),
+        credentialStore: SpyCredentialStore(apiKey: nil),
+        notifier: notifier
+    )
+
+    coordinator.beginRecording()
+
+    #expect(coordinator.phase == .failed)
+    #expect(recorder.events.isEmpty)
+    #expect(notifier.notifications == [
+        .init(title: "Wisper Clone", body: DictationError.missingAPIKey.localizedDescription)
+    ])
+}
+
+@MainActor
+@Test func dictationFlow_ignoresFinishWhenNotRecording() async throws {
+    let transcriber = SpyTranscriptionClient(result: "unused")
+    let pasteboard = SpyPasteboard()
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: URL(filePath: "/tmp/not-used.m4a")),
+        transcriber: transcriber,
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key")
+    )
+
+    coordinator.finishRecording()
+
+    #expect(coordinator.phase == .idle)
+    #expect(transcriber.requests.isEmpty)
+    #expect(pasteboard.pastedTexts.isEmpty)
+}
