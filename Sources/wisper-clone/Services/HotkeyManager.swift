@@ -17,6 +17,7 @@ final class HotkeyManager {
     private var globalMonitors: [Any] = []
     private var localMonitors: [Any] = []
     private var activeTriggers: Set<Hotkey> = []
+    private var isEventTapActive = false
     private let gestureClassifier = HotkeyGestureClassifier()
 
     init(hotkeys: Set<Hotkey>) {
@@ -55,6 +56,7 @@ final class HotkeyManager {
         globalMonitors = []
         localMonitors = []
         activeTriggers = []
+        isEventTapActive = false
         onEventTapStatusChanged?(false)
     }
 
@@ -76,6 +78,7 @@ final class HotkeyManager {
             userInfo: refcon
         ) else {
             _ = CGRequestListenEventAccess()
+            isEventTapActive = false
             onEventTapStatusChanged?(false)
             addGlobalMonitor(mask: [.flagsChanged, .keyDown, .keyUp, .otherMouseDown, .otherMouseUp])
             return
@@ -87,6 +90,7 @@ final class HotkeyManager {
 
         eventTap = tap
         runLoopSource = source
+        isEventTapActive = true
         onEventTapStatusChanged?(true)
     }
 
@@ -111,10 +115,11 @@ final class HotkeyManager {
 
     private func handle(_ event: NSEvent) {
         // Escape/paste-last are handled as plain keyDown, independent of the configured
-        // hotkeys. The event tap is `.listenOnly`, so this NSEvent handler and the CGEvent
-        // tap callback both see the event, and it also still reaches the frontmost app —
-        // an accepted limitation.
-        if event.type == .keyDown {
+        // hotkeys. The event tap is `.listenOnly`, so the event also still reaches the
+        // frontmost app — an accepted limitation. When the tap is active it already
+        // delivers these one-shot shortcuts; handling them here too would fire them twice
+        // whenever this app is frontmost, so the NSEvent path only acts as the fallback.
+        if event.type == .keyDown, !isEventTapActive {
             if event.keyCode == UInt16(kVK_Escape), event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
                 onEscape?()
                 return
@@ -160,11 +165,14 @@ final class HotkeyManager {
         case .keyDown, .keyUp:
             // Escape/paste-last are handled as plain keyDown only (no release tracking needed).
             if type == .keyDown {
-                if keyCode == Int64(kVK_Escape), !flags.contains(.maskCommand), !flags.contains(.maskControl), !flags.contains(.maskAlternate), !flags.contains(.maskShift) {
+                // Mirror the NSEvent path's .deviceIndependentFlagsMask semantics.
+                let deviceIndependentFlags = flags.intersection(
+                    [.maskCommand, .maskControl, .maskAlternate, .maskShift, .maskSecondaryFn, .maskAlphaShift]
+                )
+                if keyCode == Int64(kVK_Escape), deviceIndependentFlags.isEmpty {
                     onEscape?()
                     return
                 }
-                let deviceIndependentFlags = flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
                 if keyCode == Int64(kVK_ANSI_V), deviceIndependentFlags == [.maskCommand, .maskControl] {
                     onPasteLastShortcut?()
                     return
