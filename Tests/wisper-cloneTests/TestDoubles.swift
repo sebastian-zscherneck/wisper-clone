@@ -193,7 +193,8 @@ func makeCoordinator(
     pasteboard: TextPasting,
     credentialStore: CredentialStoring,
     notifier: UserNotifying = SpyNotifier(),
-    historyStore: TranscriptHistoryStoring = InMemoryTranscriptHistoryStore()
+    historyStore: TranscriptHistoryStoring = InMemoryTranscriptHistoryStore(),
+    hotkeyManager: HotkeyManager = HotkeyManager(hotkeys: [.fn, .mouse5])
 ) -> DictationCoordinator {
     DictationCoordinator(
         audioRecorder: recorder,
@@ -202,7 +203,7 @@ func makeCoordinator(
         paster: pasteboard,
         notifier: notifier,
         launchAtLoginManager: LaunchAtLoginManager(),
-        hotkeyManager: HotkeyManager(hotkeys: [.fn, .mouse5]),
+        hotkeyManager: hotkeyManager,
         preferencesStore: InMemoryAppPreferencesStore(),
         historyStore: historyStore
     )
@@ -220,6 +221,26 @@ func expectPhase(
         if ContinuousClock.now - start > timeout {
             Issue.record(
                 "Expected phase \(expected), got \(coordinator.phase)",
+                sourceLocation: sourceLocation
+            )
+            return
+        }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+}
+
+@MainActor
+func expectPasteCount(
+    _ expected: Int,
+    in pasteboard: SpyPasteboard,
+    timeout: Duration = .seconds(2),
+    sourceLocation: SourceLocation = #_sourceLocation
+) async throws {
+    let start = ContinuousClock.now
+    while pasteboard.pastedTexts.count != expected {
+        if ContinuousClock.now - start > timeout {
+            Issue.record(
+                "Expected \(expected) pasted texts, got \(pasteboard.pastedTexts.count)",
                 sourceLocation: sourceLocation
             )
             return

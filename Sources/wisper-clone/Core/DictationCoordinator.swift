@@ -12,6 +12,7 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var isGlobalShortcutReady = false
     @Published private(set) var dictionaryTerms: [String] = []
     @Published private(set) var inputDevices: [AudioInputDevice] = []
+    @Published private(set) var isHandsFreeActive = false
     @Published var preferences = AppPreferences() {
         didSet {
             hotkeyManager.update(hotkeys: preferences.hotkeys)
@@ -177,6 +178,7 @@ final class DictationCoordinator: ObservableObject {
         audioRecorder.cancelRecording()
         phase = .idle
         statusText = "Ready"
+        isHandsFreeActive = false
     }
 
     func retryLastPaste() {
@@ -271,10 +273,32 @@ final class DictationCoordinator: ObservableObject {
             }
         }
         hotkeyManager.onPress = { [weak self] in
-            self?.beginRecording()
+            guard let self else { return }
+            if isHandsFreeActive, phase == .recording {
+                isHandsFreeActive = false
+                finishRecording()
+            } else {
+                beginRecording()
+            }
         }
         hotkeyManager.onRelease = { [weak self] in
-            self?.finishRecording()
+            guard let self else { return }
+            guard !isHandsFreeActive else { return }
+            finishRecording()
+        }
+        hotkeyManager.onDoubleTap = { [weak self] in
+            guard let self else { return }
+            guard phase == .recording else { return }
+            isHandsFreeActive = true
+            statusText = "Recording (hands-free)..."
+        }
+        hotkeyManager.onEscape = { [weak self] in
+            guard let self else { return }
+            guard phase == .recording else { return }
+            cancelRecording()
+        }
+        hotkeyManager.onPasteLastShortcut = { [weak self] in
+            self?.retryLastPaste()
         }
     }
 
@@ -329,6 +353,7 @@ final class DictationCoordinator: ObservableObject {
     private func fail(_ error: Error) {
         phase = .failed
         statusText = error.localizedDescription
+        isHandsFreeActive = false
         notifier.notify(title: "Wisper Clone", body: error.localizedDescription)
     }
 

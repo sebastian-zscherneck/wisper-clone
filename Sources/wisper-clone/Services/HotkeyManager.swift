@@ -6,6 +6,9 @@ import Foundation
 final class HotkeyManager {
     var onPress: (() -> Void)?
     var onRelease: (() -> Void)?
+    var onDoubleTap: (() -> Void)?
+    var onEscape: (() -> Void)?
+    var onPasteLastShortcut: (() -> Void)?
     var onEventTapStatusChanged: ((Bool) -> Void)?
 
     private var hotkeys: Set<Hotkey>
@@ -14,9 +17,13 @@ final class HotkeyManager {
     private var globalMonitors: [Any] = []
     private var localMonitors: [Any] = []
     private var activeTriggers: Set<Hotkey> = []
+    private let gestureClassifier = HotkeyGestureClassifier()
 
     init(hotkeys: Set<Hotkey>) {
         self.hotkeys = hotkeys
+        gestureClassifier.onPress = { [weak self] in self?.onPress?() }
+        gestureClassifier.onRelease = { [weak self] in self?.onRelease?() }
+        gestureClassifier.onDoubleTap = { [weak self] in self?.onDoubleTap?() }
     }
 
     func update(hotkeys: Set<Hotkey>) {
@@ -103,6 +110,21 @@ final class HotkeyManager {
     }
 
     private func handle(_ event: NSEvent) {
+        // Escape/paste-last are handled as plain keyDown, independent of the configured
+        // hotkeys. The event tap is `.listenOnly`, so this NSEvent handler and the CGEvent
+        // tap callback both see the event, and it also still reaches the frontmost app —
+        // an accepted limitation.
+        if event.type == .keyDown {
+            if event.keyCode == UInt16(kVK_Escape) {
+                onEscape?()
+                return
+            }
+            if event.keyCode == UInt16(kVK_ANSI_V), event.modifierFlags.contains([.command, .control]) {
+                onPasteLastShortcut?()
+                return
+            }
+        }
+
         if hotkeys.contains(.fn), event.type == .flagsChanged {
             update(trigger: .fn, pressed: event.modifierFlags.contains(.function))
             return
@@ -136,6 +158,17 @@ final class HotkeyManager {
                 update(trigger: .fn, pressed: flags.contains(.maskSecondaryFn))
             }
         case .keyDown, .keyUp:
+            // Escape/paste-last are handled as plain keyDown only (no release tracking needed).
+            if type == .keyDown {
+                if keyCode == Int64(kVK_Escape) {
+                    onEscape?()
+                    return
+                }
+                if keyCode == Int64(kVK_ANSI_V), flags.contains([.maskCommand, .maskControl]) {
+                    onPasteLastShortcut?()
+                    return
+                }
+            }
             if hotkeys.contains(.optionSpace) {
                 handleSpace(type: type, flags: flags, keyCode: keyCode, trigger: .optionSpace, requiredFlag: .maskAlternate)
             }
@@ -216,9 +249,9 @@ final class HotkeyManager {
         guard wasPressed != isPressed else { return }
 
         if isPressed {
-            onPress?()
+            gestureClassifier.keyPressed()
         } else {
-            onRelease?()
+            gestureClassifier.keyReleased()
         }
     }
 }
