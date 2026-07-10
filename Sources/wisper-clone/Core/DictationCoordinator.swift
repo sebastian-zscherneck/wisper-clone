@@ -13,6 +13,7 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var dictionaryTerms: [String] = []
     @Published private(set) var inputDevices: [AudioInputDevice] = []
     @Published private(set) var isHandsFreeActive = false
+    @Published private(set) var audioLevels: [Float] = []
     @Published var preferences = AppPreferences() {
         didSet {
             hotkeyManager.update(hotkeys: preferences.hotkeys)
@@ -35,6 +36,8 @@ final class DictationCoordinator: ObservableObject {
     private let preferencesStore: AppPreferencesStoring
     private let historyStore: TranscriptHistoryStoring
     private var pasteTargetApplication: NSRunningApplication?
+    private var audioLevelTimer: Timer?
+    private static let maxAudioLevelSamples = 40
     nonisolated(unsafe) private var deviceConnectedObserver: NSObjectProtocol?
     nonisolated(unsafe) private var deviceDisconnectedObserver: NSObjectProtocol?
 
@@ -155,6 +158,7 @@ final class DictationCoordinator: ObservableObject {
                 phase = .recording
                 statusText = "Recording..."
                 onRecordingStarted?()
+                startAudioLevelTimer()
             } catch {
                 fail(error)
             }
@@ -164,6 +168,7 @@ final class DictationCoordinator: ObservableObject {
     func finishRecording() {
         guard phase == .recording else { return }
         isHandsFreeActive = false
+        stopAudioLevelTimer()
 
         phase = .transcribing
         statusText = "Transcribing..."
@@ -180,6 +185,7 @@ final class DictationCoordinator: ObservableObject {
 
     func cancelRecording() {
         audioRecorder.cancelRecording()
+        stopAudioLevelTimer()
         phase = .idle
         statusText = "Ready"
         isHandsFreeActive = false
@@ -388,10 +394,36 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func fail(_ error: Error) {
+        stopAudioLevelTimer()
         phase = .failed
         statusText = error.localizedDescription
         isHandsFreeActive = false
         notifier.notify(title: "Wisper Clone", body: error.localizedDescription)
+    }
+
+    private func startAudioLevelTimer() {
+        audioLevelTimer?.invalidate()
+        audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.appendAudioLevelSample()
+            }
+        }
+    }
+
+    private func stopAudioLevelTimer() {
+        audioLevelTimer?.invalidate()
+        audioLevelTimer = nil
+        audioLevels = []
+    }
+
+    private func appendAudioLevelSample() {
+        guard phase == .recording else { return }
+        var samples = audioLevels
+        samples.append(audioRecorder.currentAudioLevel)
+        if samples.count > Self.maxAudioLevelSamples {
+            samples.removeFirst(samples.count - Self.maxAudioLevelSamples)
+        }
+        audioLevels = samples
     }
 
     private func transcriptionPrompt() -> String {

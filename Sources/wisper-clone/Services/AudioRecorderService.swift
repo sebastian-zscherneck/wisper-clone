@@ -5,6 +5,7 @@ import Foundation
 protocol AudioRecording {
     var isRecording: Bool { get }
     var selectedInputDeviceID: String? { get set }
+    var currentAudioLevel: Float { get }
     func requestPermission() async -> Bool
     func availableInputDevices() -> [AudioInputDevice]
     func startRecording() throws -> URL
@@ -22,6 +23,11 @@ final class AudioRecorderService: NSObject, AudioRecording, AVCaptureFileOutputR
 
     var isRecording: Bool {
         fileOutput?.isRecording == true
+    }
+
+    var currentAudioLevel: Float {
+        guard let channel = fileOutput?.connections.first?.audioChannels.first else { return 0 }
+        return max(0, min(1, (channel.averagePowerLevel + 50) / 50))
     }
 
     func requestPermission() async -> Bool {

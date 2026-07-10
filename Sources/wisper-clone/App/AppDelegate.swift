@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var phaseObserver: AnyCancellable?
     private var recordingAnimationTimer: Timer?
     private var recordingAnimationFrame = 0
+    private lazy var flowBarController = FlowBarController(coordinator: coordinator)
+    private var flowBarPreferencesObserver: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard claimSingleRunningInstance() else { return }
@@ -30,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureStatusItem()
         configurePopover()
         observeDictationPhase()
+        observeFlowBarPreference()
         coordinator.onRecordingStarted = { [weak self] in
             self?.popover.performClose(nil)
         }
@@ -114,6 +117,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         phaseObserver = coordinator.$phase
             .sink { [weak self] phase in
                 self?.updateStatusItem(for: phase)
+            }
+    }
+
+    private func observeFlowBarPreference() {
+        flowBarPreferencesObserver = coordinator.$preferences
+            .map(\.showFlowBar)
+            .removeDuplicates()
+            .sink { [weak self] showFlowBar in
+                if showFlowBar {
+                    self?.flowBarController.show()
+                } else {
+                    self?.flowBarController.hide()
+                }
             }
     }
 

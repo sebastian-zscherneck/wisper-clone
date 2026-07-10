@@ -35,6 +35,7 @@ final class SpyRecorder: AudioRecording {
     var isRecording = false
     var selectedInputDeviceID: String?
     var devices: [AudioInputDevice] = []
+    var currentAudioLevel: Float = 0
 
     init(recordedFileURL: URL, permissionGranted: Bool = true) {
         self.recordedFileURL = recordedFileURL
@@ -261,6 +262,25 @@ func expectPhase(
         if ContinuousClock.now - start > timeout {
             Issue.record(
                 "Expected phase \(expected), got \(coordinator.phase)",
+                sourceLocation: sourceLocation
+            )
+            return
+        }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+}
+
+@MainActor
+func expectAudioLevelsNonEmpty(
+    in coordinator: DictationCoordinator,
+    timeout: Duration = .seconds(2),
+    sourceLocation: SourceLocation = #_sourceLocation
+) async throws {
+    let start = ContinuousClock.now
+    while coordinator.audioLevels.isEmpty {
+        if ContinuousClock.now - start > timeout {
+            Issue.record(
+                "Expected audioLevels to be non-empty, timed out waiting",
                 sourceLocation: sourceLocation
             )
             return

@@ -30,6 +30,7 @@ struct AppPreferences: Equatable, Sendable {
     var languageMode: TranscriptionLanguageMode = .bilingual
     var selectedInputDeviceID: String? = nil
     var cleanupLevel: CleanupLevel = .none
+    var showFlowBar: Bool = true
 }
 
 struct AudioInputDevice: Identifiable, Equatable, Sendable {

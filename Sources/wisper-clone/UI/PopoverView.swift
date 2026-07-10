@@ -140,6 +140,14 @@ struct PopoverView: View {
                 )
             )
 
+            Toggle(
+                "Show Flow Bar",
+                isOn: Binding(
+                    get: { coordinator.preferences.showFlowBar },
+                    set: { coordinator.preferences.showFlowBar = $0 }
+                )
+            )
+
             HStack {
                 Button {
                     coordinator.beginRecording()
