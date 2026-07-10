@@ -165,6 +165,44 @@ import Testing
 }
 
 @MainActor
+@Test func dictationFlow_retryLastPasteIsNoOpWhileRecordingOrTranscribing() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "busy-guard audio")
+    let pasteboard = SpyPasteboard()
+    let hotkeyManager = HotkeyManager(hotkeys: [.fn])
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: SpyTranscriptionClient(result: "first result"),
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        hotkeyManager: hotkeyManager
+    )
+
+    hotkeyManager.onPress?()
+    try await expectPhase(.recording, in: coordinator)
+    hotkeyManager.onRelease?()
+    try await expectPhase(.idle, in: coordinator)
+    #expect(pasteboard.pastedTexts == ["first result"])
+
+    // Start a second recording/transcription cycle and try to retry the paste while
+    // it is still in flight — this must be a no-op, otherwise the concurrent paste()
+    // call would race the pasteboard save/restore of the in-flight cycle.
+    hotkeyManager.onPress?()
+    try await expectPhase(.recording, in: coordinator)
+
+    coordinator.retryLastPaste()
+    #expect(pasteboard.pastedTexts.count == 1)
+
+    hotkeyManager.onRelease?()
+    try await expectPhase(.transcribing, in: coordinator)
+
+    coordinator.retryLastPaste()
+    #expect(pasteboard.pastedTexts.count == 1)
+
+    try await expectPasteCount(2, in: pasteboard)
+    #expect(pasteboard.pastedTexts == ["first result", "first result"])
+}
+
+@MainActor
 @Test func dictationFlow_pasteLastShortcutRetriesLastTranscript() async throws {
     let audioURL = try makeTemporaryAudioFile(contents: "paste-last audio")
     let pasteboard = SpyPasteboard()

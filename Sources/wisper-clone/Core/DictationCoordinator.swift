@@ -1,9 +1,11 @@
 import AppKit
 import AVFoundation
 import Foundation
+import os
 
 @MainActor
 final class DictationCoordinator: ObservableObject {
+    private let logger = Logger(subsystem: "com.wisper-clone", category: "DictationCoordinator")
     @Published private(set) var phase: DictationPhase = .idle
     @Published private(set) var statusText = "Ready"
     @Published private(set) var lastTranscript = ""
@@ -220,6 +222,7 @@ final class DictationCoordinator: ObservableObject {
 
     func retryLastPaste() {
         guard !lastTranscript.isEmpty else { return }
+        guard phase == .idle || phase == .failed else { return }
 
         Task {
             await paste(lastTranscript)
@@ -309,6 +312,8 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func pasteRaw(_ entry: TranscriptEntry) {
+        guard phase == .idle || phase == .failed else { return }
+
         Task {
             await paste(entry.rawText)
         }
@@ -355,6 +360,7 @@ final class DictationCoordinator: ObservableObject {
         hotkeyManager.onDoubleTap = { [weak self] in
             guard let self else { return }
             guard phase == .recording else { return }
+            guard recordingMode == .dictation else { return }
             isHandsFreeActive = true
             statusText = "Recording (hands-free)..."
         }
@@ -412,6 +418,7 @@ final class DictationCoordinator: ObservableObject {
                         final = polished
                     }
                 } catch {
+                    logger.error("AI cleanup failed: \(error.localizedDescription, privacy: .public)")
                     notifier.notify(title: "Wisper Clone", body: "AI cleanup failed — pasted raw transcript.")
                 }
             }

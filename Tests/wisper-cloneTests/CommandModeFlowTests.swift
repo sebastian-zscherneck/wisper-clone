@@ -85,6 +85,64 @@ import Testing
 }
 
 @MainActor
+@Test func commandFlow_doubleTapDuringCommandRecordingDoesNotEnableHandsFree() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "command double tap")
+    let pasteboard = SpyPasteboard()
+    let hotkeyManager = HotkeyManager(hotkeys: [.fn])
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: SpyTranscriptionClient(result: "make it shorter"),
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        chatClient: SpyChatClient(result: "Hi"),
+        hotkeyManager: hotkeyManager,
+        selectedTextCapturer: SpySelectedTextCapturer(result: "Hello world")
+    )
+
+    coordinator.beginCommandRecording()
+    try await expectPhase(.recording, in: coordinator)
+
+    // A stray double-tap of the dictation trigger during a command recording must not
+    // flip on hands-free mode — that would let the next dictation press finish this
+    // command recording prematurely.
+    hotkeyManager.onDoubleTap?()
+    #expect(!coordinator.isHandsFreeActive)
+
+    coordinator.finishRecording()
+    try await expectPasteCount(1, in: pasteboard)
+    #expect(pasteboard.pastedTexts == ["Hi"])
+}
+
+@MainActor
+@Test func commandFlow_dictationReleaseWhileCommandRecordingDoesNotFinishIt() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "command dictation release")
+    let pasteboard = SpyPasteboard()
+    let hotkeyManager = HotkeyManager(hotkeys: [.fn])
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: SpyTranscriptionClient(result: "make it shorter"),
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        chatClient: SpyChatClient(result: "Hi"),
+        hotkeyManager: hotkeyManager,
+        selectedTextCapturer: SpySelectedTextCapturer(result: "Hello world")
+    )
+
+    coordinator.beginCommandRecording()
+    try await expectPhase(.recording, in: coordinator)
+
+    // A stray dictation-trigger release while a command recording is in progress
+    // must not finish it.
+    hotkeyManager.onRelease?()
+    #expect(coordinator.phase == DictationPhase.recording)
+    #expect(pasteboard.pastedTexts.isEmpty)
+
+    coordinator.finishRecording()
+    try await expectPasteCount(1, in: pasteboard)
+    #expect(pasteboard.pastedTexts == ["Hi"])
+}
+
+@MainActor
 @Test func setCommandHotkey_rejectsSoleDictationHotkeyToAvoidDualRole() async throws {
     let coordinator = makeCoordinator(
         recorder: SpyRecorder(recordedFileURL: URL(filePath: "/tmp/not-used.m4a")),
