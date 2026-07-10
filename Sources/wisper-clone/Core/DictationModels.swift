@@ -31,6 +31,7 @@ struct AppPreferences: Equatable, Sendable {
     var selectedInputDeviceID: String? = nil
     var cleanupLevel: CleanupLevel = .none
     var commandHotkey: Hotkey? = nil
+    var showFlowBar: Bool = true
 }
 
 struct AudioInputDevice: Identifiable, Equatable, Sendable {

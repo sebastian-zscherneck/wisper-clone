@@ -24,6 +24,28 @@ import Testing
     #expect(store.loadPreferences().cleanupLevel == .none)
 }
 
+@Test func preferencesStore_defaultsShowFlowBarToTrue() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    #expect(store.loadPreferences().showFlowBar == true)
+}
+
+@Test func preferencesStore_roundTripsShowFlowBar() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    var preferences = AppPreferences()
+    preferences.showFlowBar = false
+    store.savePreferences(preferences)
+
+    #expect(store.loadPreferences().showFlowBar == false)
+}
+
 @Test func preferencesStore_roundTripsCommandHotkey() throws {
     let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suiteName))

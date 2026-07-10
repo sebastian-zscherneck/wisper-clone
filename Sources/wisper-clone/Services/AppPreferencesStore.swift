@@ -12,6 +12,7 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     private let selectedInputDeviceIDKey = "preferences.selectedInputDeviceID"
     private let cleanupLevelKey = "preferences.cleanupLevel"
     private let commandHotkeyKey = "preferences.commandHotkey"
+    private let showFlowBarKey = "preferences.showFlowBar"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -43,6 +44,10 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
             preferences.commandHotkey = Hotkey(rawValue: rawCommandHotkey)
         }
 
+        if defaults.object(forKey: showFlowBarKey) != nil {
+            preferences.showFlowBar = defaults.bool(forKey: showFlowBarKey)
+        }
+
         return preferences
     }
 
@@ -50,6 +55,7 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
         defaults.set(preferences.hotkeys.map(\.rawValue).sorted(), forKey: hotkeysKey)
         defaults.set(preferences.languageMode.rawValue, forKey: languageModeKey)
         defaults.set(preferences.cleanupLevel.rawValue, forKey: cleanupLevelKey)
+        defaults.set(preferences.showFlowBar, forKey: showFlowBarKey)
 
         if let selectedInputDeviceID = preferences.selectedInputDeviceID {
             defaults.set(selectedInputDeviceID, forKey: selectedInputDeviceIDKey)

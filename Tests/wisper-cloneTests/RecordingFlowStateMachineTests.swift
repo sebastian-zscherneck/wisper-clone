@@ -86,3 +86,48 @@ import Testing
     #expect(transcriber.requests.isEmpty)
     #expect(pasteboard.pastedTexts.isEmpty)
 }
+
+@MainActor
+@Test func dictationFlow_fillsAudioLevelsWhileRecordingAndClearsOnFinish() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
+    let recorder = SpyRecorder(recordedFileURL: audioURL)
+    recorder.currentAudioLevel = 0.5
+    let coordinator = makeCoordinator(
+        recorder: recorder,
+        transcriber: SpyTranscriptionClient(result: "hello"),
+        pasteboard: SpyPasteboard(),
+        credentialStore: SpyCredentialStore(apiKey: "test-key")
+    )
+
+    #expect(coordinator.audioLevels.isEmpty)
+
+    coordinator.beginRecording()
+    try await expectPhase(.recording, in: coordinator)
+    try await expectAudioLevelsNonEmpty(in: coordinator)
+    #expect(coordinator.audioLevels.allSatisfy { $0 == 0.5 })
+
+    coordinator.finishRecording()
+    try await expectPhase(.idle, in: coordinator)
+    #expect(coordinator.audioLevels.isEmpty)
+}
+
+@MainActor
+@Test func dictationFlow_clearsAudioLevelsOnCancel() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
+    let recorder = SpyRecorder(recordedFileURL: audioURL)
+    recorder.currentAudioLevel = 0.8
+    let coordinator = makeCoordinator(
+        recorder: recorder,
+        transcriber: SpyTranscriptionClient(result: "unused"),
+        pasteboard: SpyPasteboard(),
+        credentialStore: SpyCredentialStore(apiKey: "test-key")
+    )
+
+    coordinator.beginRecording()
+    try await expectPhase(.recording, in: coordinator)
+    try await expectAudioLevelsNonEmpty(in: coordinator)
+
+    coordinator.cancelRecording()
+
+    #expect(coordinator.audioLevels.isEmpty)
+}
