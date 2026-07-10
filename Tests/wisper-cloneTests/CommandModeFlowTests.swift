@@ -85,6 +85,22 @@ import Testing
 }
 
 @MainActor
+@Test func setCommandHotkey_rejectsSoleDictationHotkeyToAvoidDualRole() async throws {
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: URL(filePath: "/tmp/not-used.m4a")),
+        transcriber: SpyTranscriptionClient(result: "unused"),
+        pasteboard: SpyPasteboard(),
+        credentialStore: SpyCredentialStore(apiKey: "test-key")
+    )
+
+    coordinator.preferences.hotkeys = [.fn]
+    coordinator.setCommandHotkey(.fn)
+
+    #expect(coordinator.preferences.commandHotkey == nil)
+    #expect(coordinator.preferences.hotkeys == [.fn])
+}
+
+@MainActor
 @Test func commandFlow_emptyInstructionFailsWithNoInstructionAndDoesNotPaste() async throws {
     let audioURL = try makeTemporaryAudioFile(contents: "command empty instruction")
     let pasteboard = SpyPasteboard()

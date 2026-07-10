@@ -296,6 +296,11 @@ final class DictationCoordinator: ObservableObject {
 
     func setCommandHotkey(_ hotkey: Hotkey?) {
         var updated = preferences
+        // Refuse to hand a hotkey to both roles: if it's the only dictation hotkey,
+        // removing it would leave dictation with none, so reject the selection instead.
+        if let hotkey, updated.hotkeys.count <= 1, updated.hotkeys.contains(hotkey) {
+            return
+        }
         updated.commandHotkey = hotkey
         if let hotkey, updated.hotkeys.count > 1 {
             updated.hotkeys.remove(hotkey)
@@ -344,6 +349,7 @@ final class DictationCoordinator: ObservableObject {
         hotkeyManager.onRelease = { [weak self] in
             guard let self else { return }
             guard !isHandsFreeActive else { return }
+            guard recordingMode == .dictation else { return }
             finishRecording()
         }
         hotkeyManager.onDoubleTap = { [weak self] in
@@ -364,7 +370,9 @@ final class DictationCoordinator: ObservableObject {
             self?.beginCommandRecording()
         }
         hotkeyManager.onCommandRelease = { [weak self] in
-            self?.finishRecording()
+            guard let self else { return }
+            guard recordingMode == .command else { return }
+            finishRecording()
         }
     }
 

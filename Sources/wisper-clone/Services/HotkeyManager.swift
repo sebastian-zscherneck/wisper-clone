@@ -166,7 +166,9 @@ final class HotkeyManager {
         }
     }
 
-    fileprivate func handle(typeRawValue: UInt32, flagsRawValue: UInt64, keyCode: Int64, mouseButtonNumber: Int64) {
+    // Internal (not fileprivate) so tests can drive this exact code path — the one the
+    // real CGEventTap callback uses — via @testable import, without exposing it publicly.
+    func handle(typeRawValue: UInt32, flagsRawValue: UInt64, keyCode: Int64, mouseButtonNumber: Int64) {
         guard let type = CGEventType(rawValue: typeRawValue) else { return }
         let flags = CGEventFlags(rawValue: flagsRawValue)
 
@@ -266,6 +268,8 @@ final class HotkeyManager {
     }
 
     private func update(trigger: Hotkey, pressed: Bool) {
+        guard trigger == commandHotkey || hotkeys.contains(trigger) else { return }
+
         if trigger == commandHotkey {
             updateCommandTrigger(pressed: pressed)
             return

@@ -142,7 +142,9 @@ struct PopoverView: View {
             ) {
                 Text("Off").tag(Hotkey?.none)
                 ForEach(Hotkey.allCases) { hotkey in
-                    Text(hotkey.displayName).tag(Hotkey?.some(hotkey))
+                    Text(hotkey.displayName)
+                        .tag(Hotkey?.some(hotkey))
+                        .disabled(coordinator.preferences.hotkeys.count <= 1 && coordinator.preferences.hotkeys.contains(hotkey))
                 }
             }
 

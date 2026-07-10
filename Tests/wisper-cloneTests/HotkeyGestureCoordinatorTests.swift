@@ -1,6 +1,29 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import wisper_clone
+
+@MainActor
+@Test func hotkeyManager_fnControlWithoutConfigurationDoesNotTriggerDictationOrCommand() {
+    // Neither .fnControl, .fn, nor a command hotkey is configured — holding Fn+Control
+    // must not start dictation via the fallthrough branch of update(trigger:pressed:).
+    let manager = HotkeyManager(hotkeys: [])
+    var pressCount = 0
+    var commandPressCount = 0
+    manager.onPress = { pressCount += 1 }
+    manager.onCommandPress = { commandPressCount += 1 }
+
+    let flags = CGEventFlags.maskSecondaryFn.union(.maskControl)
+    manager.handle(
+        typeRawValue: CGEventType.flagsChanged.rawValue,
+        flagsRawValue: flags.rawValue,
+        keyCode: 0,
+        mouseButtonNumber: 0
+    )
+
+    #expect(pressCount == 0)
+    #expect(commandPressCount == 0)
+}
 
 @MainActor
 @Test func dictationFlow_finishRecordingResetsHandsFreeFlag() async throws {
@@ -110,6 +133,35 @@ import Testing
 
     #expect(coordinator.phase == .idle)
     #expect(recorder.events.isEmpty)
+}
+
+@MainActor
+@Test func dictationFlow_commandReleaseWhileDictationRecordingDoesNotFinishIt() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "test audio")
+    let recorder = SpyRecorder(recordedFileURL: audioURL)
+    let transcriber = SpyTranscriptionClient(result: "test result")
+    let pasteboard = SpyPasteboard()
+    let hotkeyManager = HotkeyManager(hotkeys: [.fn])
+    let coordinator = makeCoordinator(
+        recorder: recorder,
+        transcriber: transcriber,
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        hotkeyManager: hotkeyManager
+    )
+
+    hotkeyManager.onPress?()
+    try await expectPhase(.recording, in: coordinator)
+
+    // A stray command-hotkey release (e.g. Fn+Control tapped while Fn dictation is
+    // already recording) must not end the in-progress dictation.
+    hotkeyManager.onCommandRelease?()
+    #expect(coordinator.phase == .recording)
+    #expect(recorder.events == [.requestPermission, .start])
+
+    hotkeyManager.onRelease?()
+    try await expectPhase(.idle, in: coordinator)
+    #expect(pasteboard.pastedTexts == ["test result"])
 }
 
 @MainActor
