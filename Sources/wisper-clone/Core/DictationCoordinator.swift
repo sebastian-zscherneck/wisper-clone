@@ -47,6 +47,7 @@ final class DictationCoordinator: ObservableObject {
     private let warmUpConnection: @Sendable () -> Void
     private var pasteTargetApplication: NSRunningApplication?
     private var pasteTargetWindowTitle: String?
+    private var captureGeneration = 0
     private var recordingMode: RecordingMode = .dictation
     private var audioLevelTimer: Timer?
     private static let maxAudioLevelSamples = 40
@@ -178,9 +179,15 @@ final class DictationCoordinator: ObservableObject {
         // The window title is only needed at cleanup time (for tone detection), not to
         // start recording, so resolve it off the synchronous hot path. If it hasn't
         // resolved (or fails) by the time cleanup reads it, pasteTargetWindowTitle stays
-        // nil — same fails-closed behavior as before.
+        // nil — same fails-closed behavior as before. The generation token prevents a
+        // slow title lookup from an earlier recording overwriting a newer capture.
+        captureGeneration += 1
+        let generation = captureGeneration
         Task {
-            pasteTargetWindowTitle = await frontmostApplicationTracker.windowTitle(for: targetApplication)
+            let title = await frontmostApplicationTracker.windowTitle(for: targetApplication)
+            if generation == captureGeneration {
+                pasteTargetWindowTitle = title
+            }
         }
 
         Task {
