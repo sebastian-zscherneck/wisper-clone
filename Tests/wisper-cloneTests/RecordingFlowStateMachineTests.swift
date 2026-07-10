@@ -29,6 +29,7 @@ import Testing
         .init(
             fileURL: audioURL,
             apiKey: "test-key",
+            model: "gpt-4o-transcribe",
             prompt: """
             Transcribe this as polished personal dictation.
             The speaker may mix German and English, including within the same sentence.
@@ -130,4 +131,34 @@ import Testing
     coordinator.cancelRecording()
 
     #expect(coordinator.audioLevels.isEmpty)
+}
+
+@MainActor
+@Test(arguments: [
+    (TranscriptionQuality.accurate, "gpt-4o-transcribe"),
+    (TranscriptionQuality.fast, "gpt-4o-mini-transcribe")
+])
+func dictationFlow_usesModelForSelectedTranscriptionQuality(quality: TranscriptionQuality, expectedModel: String) async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
+    let transcriber = SpyTranscriptionClient(result: "hello")
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: transcriber,
+        pasteboard: SpyPasteboard(),
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        preferencesStore: InMemoryAppPreferencesStore(
+            preferences: {
+                var preferences = AppPreferences()
+                preferences.transcriptionQuality = quality
+                return preferences
+            }()
+        )
+    )
+
+    coordinator.beginRecording()
+    try await expectPhase(.recording, in: coordinator)
+    coordinator.finishRecording()
+    try await expectPhase(.idle, in: coordinator)
+
+    #expect(transcriber.requests.first?.model == expectedModel)
 }

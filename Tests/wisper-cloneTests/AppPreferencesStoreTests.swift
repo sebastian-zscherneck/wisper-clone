@@ -68,6 +68,28 @@ import Testing
     #expect(store.loadPreferences().commandHotkey == nil)
 }
 
+@Test func preferencesStore_defaultsTranscriptionQualityToAccurate() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    #expect(store.loadPreferences().transcriptionQuality == .accurate)
+}
+
+@Test func preferencesStore_roundTripsTranscriptionQuality() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    var preferences = AppPreferences()
+    preferences.transcriptionQuality = .fast
+    store.savePreferences(preferences)
+
+    #expect(store.loadPreferences().transcriptionQuality == .fast)
+}
+
 @Test func preferencesStore_clearsCommandHotkeyBackToNil() throws {
     let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suiteName))

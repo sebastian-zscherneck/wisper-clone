@@ -46,6 +46,7 @@ final class DictationCoordinator: ObservableObject {
     private let selectedTextCapturer: SelectedTextCapturing
     private let warmUpConnection: @Sendable () -> Void
     private var pasteTargetApplication: NSRunningApplication?
+    private var pasteTargetWindowTitle: String?
     private var recordingMode: RecordingMode = .dictation
     private var audioLevelTimer: Timer?
     private static let maxAudioLevelSamples = 40
@@ -169,7 +170,9 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         recordingMode = mode
-        pasteTargetApplication = frontmostApplicationTracker.captureTargetApplication()
+        let target = frontmostApplicationTracker.captureTargetApplication()
+        pasteTargetApplication = target.application
+        pasteTargetWindowTitle = target.windowTitle
         warmUpConnection()
 
         Task {
@@ -304,6 +307,10 @@ final class DictationCoordinator: ObservableObject {
         preferences.cleanupLevel = level
     }
 
+    func setTranscriptionQuality(_ quality: TranscriptionQuality) {
+        preferences.transcriptionQuality = quality
+    }
+
     func setCommandHotkey(_ hotkey: Hotkey?) {
         var updated = preferences
         // Refuse to hand a hotkey to both roles: if it's the only dictation hotkey,
@@ -404,6 +411,7 @@ final class DictationCoordinator: ObservableObject {
             let rawText = try await transcriptionClient.transcribe(
                 fileURL: fileURL,
                 apiKey: apiKey,
+                model: preferences.transcriptionQuality.modelName,
                 prompt: transcriptionPrompt(),
                 language: preferences.languageMode.apiLanguageCode
             )
@@ -419,11 +427,19 @@ final class DictationCoordinator: ObservableObject {
             var cleanupDuration = Duration.zero
 
             if preferences.cleanupLevel != .none {
-                let tone = AppToneProfile.profile(forBundleID: pasteTargetApplication?.bundleIdentifier)
+                let tone = AppToneProfile.profile(
+                    forBundleID: pasteTargetApplication?.bundleIdentifier,
+                    windowTitle: pasteTargetWindowTitle
+                )
                 statusText = "Polishing (\(tone.name))..."
                 let bundleID = self.pasteTargetApplication?.bundleIdentifier ?? "nil"
-                logger.debug("cleanup tone: \(tone.name, privacy: .public) for \(bundleID, privacy: .public)")
-                let systemPrompt = CleanupPromptBuilder().buildSystemPrompt(level: preferences.cleanupLevel, tone: tone)
+                let windowTitle = self.pasteTargetWindowTitle ?? "nil"
+                logger.debug("cleanup tone: \(tone.name, privacy: .public) for \(bundleID, privacy: .public) (window: \(windowTitle, privacy: .public))")
+                let systemPrompt = CleanupPromptBuilder().buildSystemPrompt(
+                    level: preferences.cleanupLevel,
+                    tone: tone,
+                    vocabulary: dictionaryTerms
+                )
                 let cleanupStart = clock.now
                 do {
                     let polished = TextCleaner.clean(
@@ -475,6 +491,7 @@ final class DictationCoordinator: ObservableObject {
             let rawInstruction = try await transcriptionClient.transcribe(
                 fileURL: fileURL,
                 apiKey: apiKey,
+                model: preferences.transcriptionQuality.modelName,
                 prompt: TranscriptionPromptBuilder().buildCommandInstructionPrompt(),
                 language: preferences.languageMode.apiLanguageCode
             )

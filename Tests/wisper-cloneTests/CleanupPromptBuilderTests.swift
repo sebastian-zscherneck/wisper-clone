@@ -14,6 +14,16 @@ func appToneProfile_matchesBundleIDPrefixes(bundleID: String?, expectedName: Str
 }
 
 @Test(arguments: [
+    ("com.google.chrome", "Posteingang – Gmail", "Email"),
+    ("com.google.chrome", "YouTube", "Neutral"),
+    ("com.apple.safari", "Compose Mail", "Email"),
+    ("com.apple.mail", nil, "Email")
+] as [(String, String?, String)])
+func appToneProfile_detectsBrowserEmailViaWindowTitle(bundleID: String, windowTitle: String?, expectedName: String) {
+    #expect(AppToneProfile.profile(forBundleID: bundleID, windowTitle: windowTitle).name == expectedName)
+}
+
+@Test(arguments: [
     (CleanupLevel.light, "Editing level: LIGHT."),
     (CleanupLevel.medium, "Editing level: MEDIUM."),
     (CleanupLevel.high, "Editing level: HIGH.")
@@ -42,6 +52,29 @@ func cleanupPromptBuilder_includesLevelMarkerAndAlwaysRules(level: CleanupLevel,
     let prompt = CleanupPromptBuilder().buildSystemPrompt(level: .medium, tone: .email)
 
     #expect(prompt.contains("own line"))
+}
+
+@Test func cleanupPromptBuilder_includesVocabularyWhenProvided() {
+    let prompt = CleanupPromptBuilder().buildSystemPrompt(level: .medium, tone: .neutral, vocabulary: ["n8n", "sellerboard"])
+
+    #expect(prompt.contains("Known terms the speaker uses"))
+    #expect(prompt.contains("n8n"))
+    #expect(prompt.contains("sellerboard"))
+}
+
+@Test func cleanupPromptBuilder_omitsVocabularyBlockWhenEmpty() {
+    let prompt = CleanupPromptBuilder().buildSystemPrompt(level: .medium, tone: .neutral, vocabulary: [])
+
+    #expect(!prompt.contains("Known terms the speaker uses"))
+}
+
+@Test func cleanupPromptBuilder_capsVocabularyAtMaxTerms() {
+    let terms = (0..<50).map { "term\($0)" }
+    let prompt = CleanupPromptBuilder().buildSystemPrompt(level: .medium, tone: .neutral, vocabulary: terms)
+
+    #expect(prompt.contains("term0"))
+    #expect(prompt.contains("term39"))
+    #expect(!prompt.contains("term40"))
 }
 
 @Test func cleanupPromptBuilder_commandSystemPromptWithSelectionAppliesInstructionToSelection() {

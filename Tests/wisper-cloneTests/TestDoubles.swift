@@ -12,6 +12,7 @@ enum RecorderEvent: Equatable {
 struct TranscriptionRequest: Equatable {
     let fileURL: URL
     let apiKey: String
+    let model: String
     let prompt: String?
     let language: String?
 }
@@ -90,9 +91,9 @@ final class SpyTranscriptionClient: TranscriptionServicing, @unchecked Sendable 
         self.error = error
     }
 
-    func transcribe(fileURL: URL, apiKey: String, prompt: String?, language: String?) async throws -> String {
+    func transcribe(fileURL: URL, apiKey: String, model: String, prompt: String?, language: String?) async throws -> String {
         lock.withLock {
-            storedRequests.append(.init(fileURL: fileURL, apiKey: apiKey, prompt: prompt, language: language))
+            storedRequests.append(.init(fileURL: fileURL, apiKey: apiKey, model: model, prompt: prompt, language: language))
         }
         if let error {
             throw error

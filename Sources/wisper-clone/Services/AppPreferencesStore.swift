@@ -13,6 +13,7 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     private let cleanupLevelKey = "preferences.cleanupLevel"
     private let commandHotkeyKey = "preferences.commandHotkey"
     private let showFlowBarKey = "preferences.showFlowBar"
+    private let transcriptionQualityKey = "preferences.transcriptionQuality"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -48,6 +49,11 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
             preferences.showFlowBar = defaults.bool(forKey: showFlowBarKey)
         }
 
+        if let rawTranscriptionQuality = defaults.string(forKey: transcriptionQualityKey),
+           let transcriptionQuality = TranscriptionQuality(rawValue: rawTranscriptionQuality) {
+            preferences.transcriptionQuality = transcriptionQuality
+        }
+
         return preferences
     }
 
@@ -56,6 +62,7 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
         defaults.set(preferences.languageMode.rawValue, forKey: languageModeKey)
         defaults.set(preferences.cleanupLevel.rawValue, forKey: cleanupLevelKey)
         defaults.set(preferences.showFlowBar, forKey: showFlowBarKey)
+        defaults.set(preferences.transcriptionQuality.rawValue, forKey: transcriptionQualityKey)
 
         if let selectedInputDeviceID = preferences.selectedInputDeviceID {
             defaults.set(selectedInputDeviceID, forKey: selectedInputDeviceIDKey)

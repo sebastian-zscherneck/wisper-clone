@@ -54,9 +54,35 @@ struct AppToneProfile: Equatable, Sendable {
 
     private static let orderedProfiles: [AppToneProfile] = [.email, .chat, .code]
 
+    private static let browserBundleIDPrefixes: [String] = [
+        "com.apple.safari",
+        "com.google.chrome",
+        "company.thebrowser.browser",
+        "org.mozilla.firefox",
+        "com.microsoft.edgemac",
+        "com.brave.browser",
+        "com.vivaldi.vivaldi"
+    ]
+
+    private static let emailWindowTitleKeywords: [String] = [
+        "gmail", "mail", "outlook", "posteingang", "compose", "nachricht", "e-mail", "email"
+    ]
+
     static func profile(forBundleID bundleID: String?) -> AppToneProfile {
+        profile(forBundleID: bundleID, windowTitle: nil)
+    }
+
+    static func profile(forBundleID bundleID: String?, windowTitle: String?) -> AppToneProfile {
         guard let bundleID else { return .neutral }
         let lowercasedBundleID = bundleID.lowercased()
+
+        if browserBundleIDPrefixes.contains(where: lowercasedBundleID.hasPrefix) {
+            let lowercasedTitle = windowTitle?.lowercased()
+            if let lowercasedTitle, emailWindowTitleKeywords.contains(where: lowercasedTitle.contains) {
+                return .email
+            }
+            return .neutral
+        }
 
         for profile in orderedProfiles where profile.bundleIDPrefixes.contains(where: lowercasedBundleID.hasPrefix) {
             return profile

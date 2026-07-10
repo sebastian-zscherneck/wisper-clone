@@ -240,6 +240,22 @@ struct PopoverView: View {
             }
 
             Picker(
+                "Transcription",
+                selection: Binding(
+                    get: { coordinator.preferences.transcriptionQuality },
+                    set: { coordinator.setTranscriptionQuality($0) }
+                )
+            ) {
+                ForEach(TranscriptionQuality.allCases) { quality in
+                    Text(quality.displayName)
+                        .tag(quality)
+                }
+            }
+            Text("Accurate: better German + custom vocabulary. Fast: lower latency.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker(
                 "AI cleanup",
                 selection: Binding(
                     get: { coordinator.preferences.cleanupLevel },

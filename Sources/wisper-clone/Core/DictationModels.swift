@@ -32,6 +32,7 @@ struct AppPreferences: Equatable, Sendable {
     var cleanupLevel: CleanupLevel = .none
     var commandHotkey: Hotkey? = nil
     var showFlowBar: Bool = true
+    var transcriptionQuality: TranscriptionQuality = .accurate
 }
 
 struct AudioInputDevice: Identifiable, Equatable, Sendable {
@@ -70,6 +71,31 @@ enum TranscriptionLanguageMode: String, CaseIterable, Identifiable, Sendable {
             return "de"
         case .english:
             return "en"
+        }
+    }
+}
+
+enum TranscriptionQuality: String, CaseIterable, Identifiable, Sendable {
+    case accurate
+    case fast
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .accurate:
+            return "Accurate"
+        case .fast:
+            return "Fast"
+        }
+    }
+
+    var modelName: String {
+        switch self {
+        case .accurate:
+            return "gpt-4o-transcribe"
+        case .fast:
+            return "gpt-4o-mini-transcribe"
         }
     }
 }

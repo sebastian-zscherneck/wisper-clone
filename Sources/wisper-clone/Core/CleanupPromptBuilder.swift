@@ -1,6 +1,10 @@
 import Foundation
 
 struct CleanupPromptBuilder: Sendable {
+    static let maxVocabularyTerms = 40
+    static let maxVocabularyCharacters = 1_200
+    static let maxVocabularyTermCharacters = 80
+
     static let basePrompt = """
     You are a dictation post-processor. You receive a raw speech-to-text transcript that may mix German and English, sometimes within one sentence.
     Rules that always apply:
@@ -38,11 +42,42 @@ struct CleanupPromptBuilder: Sendable {
     - Do not condense or summarize: the rewrite must carry over every piece of information.
     """
 
-    func buildSystemPrompt(level: CleanupLevel, tone: AppToneProfile) -> String {
+    func buildSystemPrompt(level: CleanupLevel, tone: AppToneProfile, vocabulary: [String] = []) -> String {
         precondition(level != .none, "buildSystemPrompt requires a non-none cleanup level")
 
-        return [Self.basePrompt, levelInstructions(for: level), tone.toneInstructions]
-            .joined(separator: "\n\n")
+        var sections = [Self.basePrompt, levelInstructions(for: level), tone.toneInstructions]
+
+        let limitedVocabulary = limitedVocabularyTerms(from: vocabulary)
+        if !limitedVocabulary.isEmpty {
+            sections.append(
+                "Known terms the speaker uses (correct any misspelled or mis-transcribed variants to exactly these spellings): \(limitedVocabulary.joined(separator: ", "))"
+            )
+        }
+
+        return sections.joined(separator: "\n\n")
+    }
+
+    private func limitedVocabularyTerms(from terms: [String]) -> [String] {
+        var limited: [String] = []
+        var usedCharacters = 0
+
+        for term in terms {
+            guard limited.count < Self.maxVocabularyTerms else { break }
+
+            let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            let shortened = String(trimmed.prefix(Self.maxVocabularyTermCharacters))
+            let separatorCharacters = limited.isEmpty ? 0 : 2
+            guard usedCharacters + separatorCharacters + shortened.count <= Self.maxVocabularyCharacters else {
+                break
+            }
+
+            limited.append(shortened)
+            usedCharacters += separatorCharacters + shortened.count
+        }
+
+        return limited
     }
 
     private func levelInstructions(for level: CleanupLevel) -> String {

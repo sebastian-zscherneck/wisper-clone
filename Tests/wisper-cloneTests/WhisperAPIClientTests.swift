@@ -4,7 +4,6 @@ import Testing
 
 @Test func openAITranscriptionClient_createsMultipartTranscriptionRequest() throws {
     let client = OpenAITranscriptionClient(
-        model: "gpt-4o-transcribe",
         endpoint: URL(string: "https://api.openai.com/v1/audio/transcriptions")!,
         session: .shared
     )
@@ -13,6 +12,7 @@ import Testing
     let request = client.makeRequest(
         apiKey: "test-key",
         upload: upload,
+        model: "gpt-4o-transcribe",
         prompt: "Product names: Wisper",
         language: "en"
     )
@@ -49,6 +49,7 @@ import Testing
     let text = try await client.transcribe(
         fileURL: audioURL,
         apiKey: "test-key",
+        model: "gpt-4o-transcribe",
         prompt: nil,
         language: nil
     )
@@ -67,7 +68,7 @@ import Testing
     defer { try? FileManager.default.removeItem(at: audioURL) }
 
     do {
-        _ = try await client.transcribe(fileURL: audioURL, apiKey: "bad-key", prompt: nil, language: nil)
+        _ = try await client.transcribe(fileURL: audioURL, apiKey: "bad-key", model: "gpt-4o-transcribe", prompt: nil, language: nil)
         Issue.record("Expected transcription to fail")
     } catch let error as DictationError {
         #expect(error == .transcriptionFailed("Invalid API key"))
@@ -86,7 +87,7 @@ import Testing
         .appendingPathExtension("m4a")
 
     do {
-        _ = try await client.transcribe(fileURL: missingURL, apiKey: "test-key", prompt: nil, language: nil)
+        _ = try await client.transcribe(fileURL: missingURL, apiKey: "test-key", model: "gpt-4o-transcribe", prompt: nil, language: nil)
         Issue.record("Expected missing audio file to fail")
     } catch let error as DictationError {
         #expect(error == .transcriptionFailed("Audio file does not exist."))
@@ -99,7 +100,7 @@ import Testing
     defer { try? FileManager.default.removeItem(at: audioURL) }
 
     do {
-        _ = try await client.transcribe(fileURL: audioURL, apiKey: "test-key", prompt: nil, language: nil)
+        _ = try await client.transcribe(fileURL: audioURL, apiKey: "test-key", model: "gpt-4o-transcribe", prompt: nil, language: nil)
         Issue.record("Expected empty audio file to fail")
     } catch let error as DictationError {
         #expect(error == .transcriptionFailed("Audio file is empty."))
@@ -116,7 +117,7 @@ import Testing
     try handle.close()
 
     do {
-        _ = try await client.transcribe(fileURL: audioURL, apiKey: "test-key", prompt: nil, language: nil)
+        _ = try await client.transcribe(fileURL: audioURL, apiKey: "test-key", model: "gpt-4o-transcribe", prompt: nil, language: nil)
         Issue.record("Expected oversized audio file to fail")
     } catch let error as DictationError {
         #expect(error == .transcriptionFailed("Audio file is larger than 25 MB."))

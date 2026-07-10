@@ -1,7 +1,7 @@
 import Foundation
 
 protocol TranscriptionServicing: Sendable {
-    func transcribe(fileURL: URL, apiKey: String, prompt: String?, language: String?) async throws -> String
+    func transcribe(fileURL: URL, apiKey: String, model: String, prompt: String?, language: String?) async throws -> String
 }
 
 struct AudioUpload: Sendable {
@@ -12,17 +12,15 @@ struct AudioUpload: Sendable {
 
 struct OpenAITranscriptionClient: TranscriptionServicing, Sendable {
     static let maxUploadBytes = 25 * 1_000 * 1_000
+    static let defaultModel = "gpt-4o-transcribe"
 
-    let model: String
     let endpoint: URL
     let session: URLSession
 
     init(
-        model: String = "gpt-4o-mini-transcribe",
         endpoint: URL = URL(string: "https://api.openai.com/v1/audio/transcriptions")!,
         session: URLSession = .shared
     ) {
-        self.model = model
         self.endpoint = endpoint
         self.session = session
     }
@@ -39,14 +37,14 @@ struct OpenAITranscriptionClient: TranscriptionServicing, Sendable {
         }
     }
 
-    func transcribe(fileURL: URL, apiKey: String, prompt: String?, language: String?) async throws -> String {
+    func transcribe(fileURL: URL, apiKey: String, model: String, prompt: String?, language: String?) async throws -> String {
         try validateUpload(fileURL: fileURL)
         let upload = try AudioUpload(
             data: Data(contentsOf: fileURL),
             filename: fileURL.lastPathComponent,
             mimeType: mimeType(for: fileURL)
         )
-        let request = makeRequest(apiKey: apiKey, upload: upload, prompt: prompt, language: language)
+        let request = makeRequest(apiKey: apiKey, upload: upload, model: model, prompt: prompt, language: language)
         let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -63,17 +61,17 @@ struct OpenAITranscriptionClient: TranscriptionServicing, Sendable {
         return decoded.text
     }
 
-    func makeRequest(apiKey: String, upload: AudioUpload, prompt: String?, language: String?) -> URLRequest {
+    func makeRequest(apiKey: String, upload: AudioUpload, model: String, prompt: String?, language: String?) -> URLRequest {
         let boundary = "Boundary-\(UUID().uuidString)"
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = multipartBody(boundary: boundary, upload: upload, prompt: prompt, language: language)
+        request.httpBody = multipartBody(boundary: boundary, upload: upload, model: model, prompt: prompt, language: language)
         return request
     }
 
-    func multipartBody(boundary: String, upload: AudioUpload, prompt: String?, language: String?) -> Data {
+    func multipartBody(boundary: String, upload: AudioUpload, model: String, prompt: String?, language: String?) -> Data {
         var body = Data()
         body.appendMultipartField(name: "model", value: model, boundary: boundary)
         body.appendMultipartField(name: "response_format", value: "json", boundary: boundary)
