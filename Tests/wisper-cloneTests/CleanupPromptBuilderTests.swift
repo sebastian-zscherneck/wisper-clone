@@ -17,7 +17,9 @@ func appToneProfile_matchesBundleIDPrefixes(bundleID: String?, expectedName: Str
     ("com.google.chrome", "Posteingang – Gmail", "Email"),
     ("com.google.chrome", "YouTube", "Neutral"),
     ("com.apple.safari", "Compose Mail", "Email"),
-    ("com.apple.mail", nil, "Email")
+    ("com.apple.mail", nil, "Email"),
+    ("com.google.chrome", "Mailchimp Campaign Builder", "Neutral"),
+    ("com.apple.safari", "Neue Mailingliste erstellen", "Neutral")
 ] as [(String, String?, String)])
 func appToneProfile_detectsBrowserEmailViaWindowTitle(bundleID: String, windowTitle: String?, expectedName: String) {
     #expect(AppToneProfile.profile(forBundleID: bundleID, windowTitle: windowTitle).name == expectedName)

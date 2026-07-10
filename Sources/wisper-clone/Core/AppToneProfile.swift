@@ -65,7 +65,7 @@ struct AppToneProfile: Equatable, Sendable {
     ]
 
     private static let emailWindowTitleKeywords: [String] = [
-        "gmail", "mail", "outlook", "posteingang", "compose", "nachricht", "e-mail", "email"
+        "gmail", "outlook", "posteingang", "compose", "e-mail", "email", "nachricht"
     ]
 
     static func profile(forBundleID bundleID: String?) -> AppToneProfile {

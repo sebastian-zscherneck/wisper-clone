@@ -20,14 +20,29 @@ final class FrontmostApplicationTracker {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
-    func captureTargetApplication() -> (application: NSRunningApplication?, windowTitle: String?) {
+    /// Captures the frontmost external application synchronously via NSWorkspace.
+    /// Cheap in-process lookup only — does not touch the Accessibility API, so it never
+    /// blocks on a cross-process round trip to a busy app.
+    func captureTargetApplication() -> NSRunningApplication? {
         let current = NSWorkspace.shared.frontmostApplication
         let application = isExternalApplication(current) ? current : nil
         if let application {
             update(with: application)
-            return (application, focusedWindowTitle(for: application))
+            return application
         }
-        return (lastExternalApplication, focusedWindowTitle(for: lastExternalApplication))
+        return lastExternalApplication
+    }
+
+    /// Reads the focused window title for `application` via the Accessibility API.
+    /// This performs up to two cross-process AXUIElementCopyAttributeValue round trips,
+    /// so it runs detached off the main actor and only hops back to deliver the result —
+    /// callers should await it from within their own async work, not on the synchronous
+    /// recording-start path, since a busy target app can make it stall.
+    nonisolated func windowTitle(for application: NSRunningApplication?) async -> String? {
+        guard let application else { return nil }
+        return await Task.detached {
+            Self.focusedWindowTitle(for: application)
+        }.value
     }
 
     func activate(_ application: NSRunningApplication?) async {
@@ -58,10 +73,10 @@ final class FrontmostApplicationTracker {
 
     /// Reads the title of the target app's focused window via the Accessibility API.
     /// Best-effort only: missing Accessibility permission or any AX failure yields nil,
-    /// it never throws.
-    private func focusedWindowTitle(for application: NSRunningApplication?) -> String? {
-        guard let application else { return nil }
-
+    /// it never throws. Static and nonisolated: AXUIElementCopyAttributeValue is
+    /// thread-safe, and this holds no reference to tracker state, so it is safe to
+    /// invoke off the main actor from `windowTitle(for:)`.
+    private nonisolated static func focusedWindowTitle(for application: NSRunningApplication) -> String? {
         let axApplication = AXUIElementCreateApplication(application.processIdentifier)
         var focusedWindow: CFTypeRef?
         let windowResult = AXUIElementCopyAttributeValue(
