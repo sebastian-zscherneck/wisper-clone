@@ -18,7 +18,9 @@ struct TranscriptionPromptBuilder: Sendable {
     func build(dictionaryTerms: [String]) -> String {
         var prompt = """
         Transcribe this as polished personal dictation.
-        The speaker may mix German and English, including within the same sentence.
+        The speaker frequently mixes German and English, often switching within the same sentence.
+        Write every word in the language it was spoken in - never translate, never normalize a sentence to one language.
+        Example of the expected mixed style: "Ich habe den n8n workflow gestern deployed und die error rate ist deutlich runter."
         Preserve the spoken language and meaning of each phrase; do not translate or add facts.
         Lightly smooth filler words, repeated words, obvious false starts, and minor spoken disfluencies.
         Use natural punctuation, capitalization, and short paragraphs for readability.

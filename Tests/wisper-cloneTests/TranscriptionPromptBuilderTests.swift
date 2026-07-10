@@ -5,7 +5,7 @@ import Testing
 @Test func transcriptionPromptBuilder_describesMixedGermanEnglishDictation() {
     let prompt = TranscriptionPromptBuilder().build(dictionaryTerms: [])
 
-    #expect(prompt.contains("The speaker may mix German and English"))
+    #expect(prompt.contains("The speaker frequently mixes German and English") && prompt.contains("Example of the expected mixed style"))
     #expect(prompt.contains("Preserve the spoken language and meaning of each phrase; do not translate or add facts."))
     #expect(prompt.contains("Lightly smooth filler words"))
     #expect(prompt.contains("format them as a concise bullet list"))
