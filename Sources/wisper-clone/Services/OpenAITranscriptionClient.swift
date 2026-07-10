@@ -18,13 +18,25 @@ struct OpenAITranscriptionClient: TranscriptionServicing, Sendable {
     let session: URLSession
 
     init(
-        model: String = "gpt-4o-transcribe",
+        model: String = "gpt-4o-mini-transcribe",
         endpoint: URL = URL(string: "https://api.openai.com/v1/audio/transcriptions")!,
         session: URLSession = .shared
     ) {
         self.model = model
         self.endpoint = endpoint
         self.session = session
+    }
+
+    /// Fires a fire-and-forget HEAD request to warm up DNS + TLS for the API host
+    /// while the user is still speaking, so the real request doesn't pay that latency.
+    /// Errors are intentionally ignored: this is a best-effort optimization, not a
+    /// prerequisite for transcription to work.
+    static func warmUpConnection(session: URLSession = .shared, host: URL = URL(string: "https://api.openai.com")!) {
+        var request = URLRequest(url: host)
+        request.httpMethod = "HEAD"
+        Task {
+            _ = try? await session.data(for: request)
+        }
     }
 
     func transcribe(fileURL: URL, apiKey: String, prompt: String?, language: String?) async throws -> String {

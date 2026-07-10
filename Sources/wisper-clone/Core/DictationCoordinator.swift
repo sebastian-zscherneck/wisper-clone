@@ -44,6 +44,7 @@ final class DictationCoordinator: ObservableObject {
     private let preferencesStore: AppPreferencesStoring
     private let historyStore: TranscriptHistoryStoring
     private let selectedTextCapturer: SelectedTextCapturing
+    private let warmUpConnection: @Sendable () -> Void
     private var pasteTargetApplication: NSRunningApplication?
     private var recordingMode: RecordingMode = .dictation
     private var audioLevelTimer: Timer?
@@ -64,7 +65,8 @@ final class DictationCoordinator: ObservableObject {
         personalDictionaryStore: PersonalDictionaryStore = PersonalDictionaryStore(),
         preferencesStore: AppPreferencesStoring = UserDefaultsAppPreferencesStore(),
         historyStore: TranscriptHistoryStoring = FileTranscriptHistoryStore(),
-        selectedTextCapturer: SelectedTextCapturing = SelectedTextCapturer()
+        selectedTextCapturer: SelectedTextCapturing = SelectedTextCapturer(),
+        warmUpConnection: @escaping @Sendable () -> Void = { OpenAITranscriptionClient.warmUpConnection() }
     ) {
         self.audioRecorder = audioRecorder
         self.transcriptionClient = transcriptionClient
@@ -79,6 +81,7 @@ final class DictationCoordinator: ObservableObject {
         self.preferencesStore = preferencesStore
         self.historyStore = historyStore
         self.selectedTextCapturer = selectedTextCapturer
+        self.warmUpConnection = warmUpConnection
 
         hasAPIKey = ((try? credentialStore.readAPIKey()) ?? nil)?.isEmpty == false
         dictionaryTerms = personalDictionaryStore.loadTerms()
@@ -167,6 +170,7 @@ final class DictationCoordinator: ObservableObject {
         }
         recordingMode = mode
         pasteTargetApplication = frontmostApplicationTracker.captureTargetApplication()
+        warmUpConnection()
 
         Task {
             let granted = await audioRecorder.requestPermission()
@@ -196,14 +200,17 @@ final class DictationCoordinator: ObservableObject {
         statusText = "Transcribing..."
 
         let mode = recordingMode
+        let clock = ContinuousClock()
         Task {
             do {
+                let stopStart = clock.now
                 let fileURL = try await audioRecorder.stopRecording()
+                let stopDuration = clock.now - stopStart
                 switch mode {
                 case .dictation:
-                    await transcribeAndPaste(fileURL: fileURL)
+                    await transcribeAndPaste(fileURL: fileURL, stopDuration: stopDuration)
                 case .command:
-                    await runCommand(fileURL: fileURL)
+                    await runCommand(fileURL: fileURL, stopDuration: stopDuration)
                 }
             } catch {
                 fail(error)
@@ -382,22 +389,26 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    private func transcribeAndPaste(fileURL: URL) async {
+    private func transcribeAndPaste(fileURL: URL, stopDuration: Duration) async {
         defer {
             try? FileManager.default.removeItem(at: fileURL)
         }
+        let clock = ContinuousClock()
 
         do {
             guard let apiKey = try credentialStore.readAPIKey(), !apiKey.isEmpty else {
                 throw DictationError.missingAPIKey
             }
 
+            let transcribeStart = clock.now
             let rawText = try await transcriptionClient.transcribe(
                 fileURL: fileURL,
                 apiKey: apiKey,
                 prompt: transcriptionPrompt(),
                 language: preferences.languageMode.apiLanguageCode
             )
+            let transcribeDuration = clock.now - transcribeStart
+
             let cleaned = TextCleaner.clean(rawText)
             guard !cleaned.isEmpty else {
                 throw DictationError.emptyTranscript
@@ -405,11 +416,15 @@ final class DictationCoordinator: ObservableObject {
 
             let raw = cleaned
             var final = cleaned
+            var cleanupDuration = Duration.zero
 
             if preferences.cleanupLevel != .none {
-                statusText = "Polishing..."
                 let tone = AppToneProfile.profile(forBundleID: pasteTargetApplication?.bundleIdentifier)
+                statusText = "Polishing (\(tone.name))..."
+                let bundleID = self.pasteTargetApplication?.bundleIdentifier ?? "nil"
+                logger.debug("cleanup tone: \(tone.name, privacy: .public) for \(bundleID, privacy: .public)")
                 let systemPrompt = CleanupPromptBuilder().buildSystemPrompt(level: preferences.cleanupLevel, tone: tone)
+                let cleanupStart = clock.now
                 do {
                     let polished = TextCleaner.clean(
                         try await chatClient.complete(systemPrompt: systemPrompt, userMessage: raw, apiKey: apiKey)
@@ -421,22 +436,29 @@ final class DictationCoordinator: ObservableObject {
                     logger.error("AI cleanup failed: \(error.localizedDescription, privacy: .public)")
                     notifier.notify(title: "Wisper Clone", body: "AI cleanup failed — pasted raw transcript.")
                 }
+                cleanupDuration = clock.now - cleanupStart
             }
 
             lastTranscript = final
             history.insert(TranscriptEntry(text: final, rawText: raw), at: 0)
             history = Array(history.prefix(FileTranscriptHistoryStore.maxEntries))
             historyStore.saveEntries(history)
+
+            let pasteStart = clock.now
             await paste(final)
+            let pasteDuration = clock.now - pasteStart
+
+            logTiming(prefix: "dictation", stop: stopDuration, transcribe: transcribeDuration, middle: ("cleanup", cleanupDuration), paste: pasteDuration)
         } catch {
             fail(error)
         }
     }
 
-    private func runCommand(fileURL: URL) async {
+    private func runCommand(fileURL: URL, stopDuration: Duration) async {
         defer {
             try? FileManager.default.removeItem(at: fileURL)
         }
+        let clock = ContinuousClock()
 
         do {
             guard let apiKey = try credentialStore.readAPIKey(), !apiKey.isEmpty else {
@@ -449,12 +471,15 @@ final class DictationCoordinator: ObservableObject {
             await frontmostApplicationTracker.activate(pasteTargetApplication)
             let selectedText = try await selectedTextCapturer.captureSelectedText()
 
+            let transcribeStart = clock.now
             let rawInstruction = try await transcriptionClient.transcribe(
                 fileURL: fileURL,
                 apiKey: apiKey,
                 prompt: TranscriptionPromptBuilder().buildCommandInstructionPrompt(),
                 language: preferences.languageMode.apiLanguageCode
             )
+            let transcribeDuration = clock.now - transcribeStart
+
             let instruction = TextCleaner.clean(rawInstruction)
             guard !instruction.isEmpty else {
                 throw DictationError.noInstruction
@@ -465,7 +490,10 @@ final class DictationCoordinator: ObservableObject {
             let systemPrompt = promptBuilder.buildCommandSystemPrompt(hasSelection: selectedText != nil)
             let userMessage = promptBuilder.buildCommandUserMessage(instruction: instruction, selectedText: selectedText)
 
+            let chatStart = clock.now
             let rawResult = try await chatClient.complete(systemPrompt: systemPrompt, userMessage: userMessage, apiKey: apiKey)
+            let chatDuration = clock.now - chatStart
+
             let result = TextCleaner.clean(rawResult)
             guard !result.isEmpty else {
                 throw DictationError.chatCompletionFailed("Empty response")
@@ -475,7 +503,12 @@ final class DictationCoordinator: ObservableObject {
             history.insert(TranscriptEntry(text: result, rawText: selectedText ?? result), at: 0)
             history = Array(history.prefix(FileTranscriptHistoryStore.maxEntries))
             historyStore.saveEntries(history)
+
+            let pasteStart = clock.now
             await paste(result)
+            let pasteDuration = clock.now - pasteStart
+
+            logTiming(prefix: "command", stop: stopDuration, transcribe: transcribeDuration, middle: ("chat", chatDuration), paste: pasteDuration)
         } catch {
             fail(error)
         }
@@ -533,6 +566,18 @@ final class DictationCoordinator: ObservableObject {
 
     private func transcriptionPrompt() -> String {
         TranscriptionPromptBuilder().build(dictionaryTerms: dictionaryTerms)
+    }
+
+    private func logTiming(prefix: String, stop: Duration, transcribe: Duration, middle: (label: String, duration: Duration), paste: Duration) {
+        let total = stop + transcribe + middle.duration + paste
+        let message = "\(prefix) timing: stop=\(formatDuration(stop)) transcribe=\(formatDuration(transcribe)) \(middle.label)=\(formatDuration(middle.duration)) paste=\(formatDuration(paste)) total=\(formatDuration(total))"
+        logger.info("\(message, privacy: .public)")
+    }
+
+    private func formatDuration(_ duration: Duration) -> String {
+        let components = duration.components
+        let seconds = Double(components.seconds) + Double(components.attoseconds) / 1_000_000_000_000_000_000
+        return String(format: "%.1fs", seconds)
     }
 
     private func openSettings(_ urlString: String) {

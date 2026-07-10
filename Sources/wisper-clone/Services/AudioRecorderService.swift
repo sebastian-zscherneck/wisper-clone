@@ -89,6 +89,15 @@ final class AudioRecorderService: NSObject, AudioRecording, AVCaptureFileOutputR
             throw DictationError.recordingUnavailable
         }
 
+        // Re-encode to mono/16kHz/32kbps AAC before writing to disk: speech-to-text
+        // doesn't need stereo or a high sample rate, and a smaller file uploads faster.
+        fileOutput.audioSettings = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: 16_000,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderBitRateKey: 32_000
+        ]
+
         fileOutput.startRecording(
             to: fileURL,
             outputFileType: .m4a,

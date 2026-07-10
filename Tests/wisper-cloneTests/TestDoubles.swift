@@ -273,7 +273,8 @@ func makeCoordinator(
         hotkeyManager: hotkeyManager,
         preferencesStore: preferencesStore,
         historyStore: historyStore,
-        selectedTextCapturer: selectedTextCapturer
+        selectedTextCapturer: selectedTextCapturer,
+        warmUpConnection: {} // no-op in tests: never hit the real network
     )
 }
 
