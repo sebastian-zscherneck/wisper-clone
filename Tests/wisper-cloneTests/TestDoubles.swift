@@ -16,6 +16,12 @@ struct TranscriptionRequest: Equatable {
     let language: String?
 }
 
+struct ChatCompletionRequest: Equatable {
+    let systemPrompt: String
+    let userMessage: String
+    let apiKey: String
+}
+
 struct NotificationRecord: Equatable {
     let title: String
     let body: String
@@ -86,6 +92,37 @@ final class SpyTranscriptionClient: TranscriptionServicing, @unchecked Sendable 
     func transcribe(fileURL: URL, apiKey: String, prompt: String?, language: String?) async throws -> String {
         lock.withLock {
             storedRequests.append(.init(fileURL: fileURL, apiKey: apiKey, prompt: prompt, language: language))
+        }
+        if let error {
+            throw error
+        }
+        return result
+    }
+}
+
+final class SpyChatClient: ChatCompleting, @unchecked Sendable {
+    private let result: String
+    private let error: (any Error)?
+    private let lock = NSLock()
+    private var storedRequests: [ChatCompletionRequest] = []
+
+    var requests: [ChatCompletionRequest] {
+        lock.withLock { storedRequests }
+    }
+
+    init(result: String = "") {
+        self.result = result
+        self.error = nil
+    }
+
+    init(error: any Error) {
+        self.result = ""
+        self.error = error
+    }
+
+    func complete(systemPrompt: String, userMessage: String, apiKey: String) async throws -> String {
+        lock.withLock {
+            storedRequests.append(.init(systemPrompt: systemPrompt, userMessage: userMessage, apiKey: apiKey))
         }
         if let error {
             throw error
@@ -192,19 +229,22 @@ func makeCoordinator(
     transcriber: TranscriptionServicing,
     pasteboard: TextPasting,
     credentialStore: CredentialStoring,
+    chatClient: ChatCompleting = SpyChatClient(result: ""),
     notifier: UserNotifying = SpyNotifier(),
     historyStore: TranscriptHistoryStoring = InMemoryTranscriptHistoryStore(),
+    preferencesStore: AppPreferencesStoring = InMemoryAppPreferencesStore(),
     hotkeyManager: HotkeyManager = HotkeyManager(hotkeys: [.fn, .mouse5])
 ) -> DictationCoordinator {
     DictationCoordinator(
         audioRecorder: recorder,
         transcriptionClient: transcriber,
+        chatClient: chatClient,
         credentialStore: credentialStore,
         paster: pasteboard,
         notifier: notifier,
         launchAtLoginManager: LaunchAtLoginManager(),
         hotkeyManager: hotkeyManager,
-        preferencesStore: InMemoryAppPreferencesStore(),
+        preferencesStore: preferencesStore,
         historyStore: historyStore
     )
 }

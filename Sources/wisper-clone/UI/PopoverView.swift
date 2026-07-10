@@ -214,6 +214,22 @@ struct PopoverView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
+
+            Picker(
+                "AI cleanup",
+                selection: Binding(
+                    get: { coordinator.preferences.cleanupLevel },
+                    set: { coordinator.setCleanupLevel($0) }
+                )
+            ) {
+                ForEach(CleanupLevel.allCases) { level in
+                    Text(level.displayName)
+                        .tag(level)
+                }
+            }
+            Text("Off pastes the raw transcript. Higher levels rewrite more.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -239,6 +255,15 @@ struct PopoverView: View {
                 }
                 .help("Copy")
                 .disabled(coordinator.lastTranscript.isEmpty)
+
+                if let latestEntry = coordinator.history.first, latestEntry.wasEdited {
+                    Button {
+                        coordinator.pasteRaw(latestEntry)
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .help("Undo AI edit")
+                }
             }
 
             ScrollView {
@@ -336,6 +361,13 @@ struct PopoverView: View {
                     .help("Remove entry")
                 }
                 .padding(.vertical, 2)
+                .contextMenu {
+                    if entry.wasEdited {
+                        Button("Copy raw") {
+                            coordinator.copyRaw(entry)
+                        }
+                    }
+                }
             }
             .listStyle(.plain)
             .frame(height: 120)

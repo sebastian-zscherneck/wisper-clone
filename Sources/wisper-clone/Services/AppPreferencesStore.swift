@@ -10,6 +10,7 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     private let hotkeysKey = "preferences.hotkeys"
     private let languageModeKey = "preferences.languageMode"
     private let selectedInputDeviceIDKey = "preferences.selectedInputDeviceID"
+    private let cleanupLevelKey = "preferences.cleanupLevel"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -31,12 +32,19 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
         }
 
         preferences.selectedInputDeviceID = defaults.string(forKey: selectedInputDeviceIDKey)
+
+        if let rawCleanupLevel = defaults.string(forKey: cleanupLevelKey),
+           let cleanupLevel = CleanupLevel(rawValue: rawCleanupLevel) {
+            preferences.cleanupLevel = cleanupLevel
+        }
+
         return preferences
     }
 
     func savePreferences(_ preferences: AppPreferences) {
         defaults.set(preferences.hotkeys.map(\.rawValue).sorted(), forKey: hotkeysKey)
         defaults.set(preferences.languageMode.rawValue, forKey: languageModeKey)
+        defaults.set(preferences.cleanupLevel.rawValue, forKey: cleanupLevelKey)
 
         if let selectedInputDeviceID = preferences.selectedInputDeviceID {
             defaults.set(selectedInputDeviceID, forKey: selectedInputDeviceIDKey)

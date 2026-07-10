@@ -29,6 +29,7 @@ struct AppPreferences: Equatable, Sendable {
     var launchAtLogin: Bool = false
     var languageMode: TranscriptionLanguageMode = .bilingual
     var selectedInputDeviceID: String? = nil
+    var cleanupLevel: CleanupLevel = .none
 }
 
 struct AudioInputDevice: Identifiable, Equatable, Sendable {
@@ -71,6 +72,28 @@ enum TranscriptionLanguageMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum CleanupLevel: String, CaseIterable, Identifiable, Sendable {
+    case none
+    case light
+    case medium
+    case high
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none:
+            return "Off"
+        case .light:
+            return "Light"
+        case .medium:
+            return "Medium"
+        case .high:
+            return "High"
+        }
+    }
+}
+
 enum Hotkey: String, CaseIterable, Identifiable, Sendable {
     case fn
     case mouse5
@@ -101,6 +124,7 @@ enum DictationError: LocalizedError, Equatable {
     case emptyTranscript
     case pasteFailed
     case transcriptionFailed(String)
+    case chatCompletionFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -118,6 +142,8 @@ enum DictationError: LocalizedError, Equatable {
             return "The text was copied, but automatic paste failed."
         case .transcriptionFailed(let message):
             return message
+        case .chatCompletionFailed(let message):
+            return "AI processing failed: \(message)"
         }
     }
 }

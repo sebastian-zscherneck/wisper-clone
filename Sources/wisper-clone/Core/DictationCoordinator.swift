@@ -24,6 +24,7 @@ final class DictationCoordinator: ObservableObject {
 
     private var audioRecorder: AudioRecording
     private let transcriptionClient: TranscriptionServicing
+    private let chatClient: ChatCompleting
     private let credentialStore: CredentialStoring
     private let paster: TextPasting
     private let notifier: UserNotifying
@@ -40,6 +41,7 @@ final class DictationCoordinator: ObservableObject {
     init(
         audioRecorder: AudioRecording = AudioRecorderService(),
         transcriptionClient: TranscriptionServicing = OpenAITranscriptionClient(),
+        chatClient: ChatCompleting = OpenAIChatClient(),
         credentialStore: CredentialStoring = KeychainCredentialStore(),
         paster: TextPasting = ClipboardPaster(),
         notifier: UserNotifying = UserNotifier(),
@@ -52,6 +54,7 @@ final class DictationCoordinator: ObservableObject {
     ) {
         self.audioRecorder = audioRecorder
         self.transcriptionClient = transcriptionClient
+        self.chatClient = chatClient
         self.credentialStore = credentialStore
         self.paster = paster
         self.notifier = notifier
@@ -254,6 +257,21 @@ final class DictationCoordinator: ObservableObject {
         preferences.languageMode = mode
     }
 
+    func setCleanupLevel(_ level: CleanupLevel) {
+        preferences.cleanupLevel = level
+    }
+
+    func pasteRaw(_ entry: TranscriptEntry) {
+        Task {
+            await paste(entry.rawText)
+        }
+    }
+
+    func copyRaw(_ entry: TranscriptEntry) {
+        paster.copy(entry.rawText)
+        statusText = "Copied"
+    }
+
     func openAccessibilitySettings() {
         openSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
     }
@@ -323,11 +341,30 @@ final class DictationCoordinator: ObservableObject {
                 throw DictationError.emptyTranscript
             }
 
-            lastTranscript = cleaned
-            history.insert(TranscriptEntry(text: cleaned), at: 0)
+            let raw = cleaned
+            var final = cleaned
+
+            if preferences.cleanupLevel != .none {
+                statusText = "Polishing..."
+                let tone = AppToneProfile.profile(forBundleID: pasteTargetApplication?.bundleIdentifier)
+                let systemPrompt = CleanupPromptBuilder().buildSystemPrompt(level: preferences.cleanupLevel, tone: tone)
+                do {
+                    let polished = TextCleaner.clean(
+                        try await chatClient.complete(systemPrompt: systemPrompt, userMessage: raw, apiKey: apiKey)
+                    )
+                    if !polished.isEmpty {
+                        final = polished
+                    }
+                } catch {
+                    notifier.notify(title: "Wisper Clone", body: "AI cleanup failed — pasted raw transcript.")
+                }
+            }
+
+            lastTranscript = final
+            history.insert(TranscriptEntry(text: final, rawText: raw), at: 0)
             history = Array(history.prefix(FileTranscriptHistoryStore.maxEntries))
             historyStore.saveEntries(history)
-            await paste(cleaned)
+            await paste(final)
         } catch {
             fail(error)
         }
