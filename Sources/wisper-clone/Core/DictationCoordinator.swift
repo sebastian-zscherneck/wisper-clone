@@ -450,7 +450,8 @@ final class DictationCoordinator: ObservableObject {
                 let bundleID = self.pasteTargetApplication?.bundleIdentifier ?? "nil"
                 let windowTitle = self.pasteTargetWindowTitle ?? "nil"
                 logger.debug("cleanup tone: \(tone.name, privacy: .public) for \(bundleID, privacy: .public) (window: \(windowTitle, privacy: .public))")
-                let systemPrompt = CleanupPromptBuilder().buildSystemPrompt(
+                let promptBuilder = CleanupPromptBuilder()
+                let systemPrompt = promptBuilder.buildSystemPrompt(
                     level: preferences.cleanupLevel,
                     tone: tone,
                     vocabulary: dictionaryTerms
@@ -458,7 +459,7 @@ final class DictationCoordinator: ObservableObject {
                 let cleanupStart = clock.now
                 do {
                     let polished = TextCleaner.clean(
-                        try await chatClient.complete(systemPrompt: systemPrompt, userMessage: raw, apiKey: apiKey)
+                        try await chatClient.complete(systemPrompt: systemPrompt, userMessage: promptBuilder.buildCleanupUserMessage(transcript: raw), apiKey: apiKey)
                     )
                     if !polished.isEmpty {
                         final = polished

@@ -51,7 +51,9 @@ import Testing
     try await expectPhase(.idle, in: coordinator)
 
     #expect(chatClient.requests.count == 1)
-    #expect(chatClient.requests.first?.userMessage == "raw transcript")
+    let userMessage = chatClient.requests.first?.userMessage ?? ""
+    #expect(userMessage.contains("<<<TRANSCRIPT\nraw transcript\nTRANSCRIPT>>>"))
+    #expect(userMessage.contains("not a message addressed to you"))
     #expect(chatClient.requests.first?.apiKey == "test-key")
     #expect(chatClient.requests.first?.systemPrompt.contains("Editing level: MEDIUM.") == true)
     #expect(pasteboard.pastedTexts == ["Polished transcript."])
