@@ -11,6 +11,7 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     private let languageModeKey = "preferences.languageMode"
     private let selectedInputDeviceIDKey = "preferences.selectedInputDeviceID"
     private let cleanupLevelKey = "preferences.cleanupLevel"
+    private let commandHotkeyKey = "preferences.commandHotkey"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -38,6 +39,10 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
             preferences.cleanupLevel = cleanupLevel
         }
 
+        if let rawCommandHotkey = defaults.string(forKey: commandHotkeyKey) {
+            preferences.commandHotkey = Hotkey(rawValue: rawCommandHotkey)
+        }
+
         return preferences
     }
 
@@ -50,6 +55,12 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
             defaults.set(selectedInputDeviceID, forKey: selectedInputDeviceIDKey)
         } else {
             defaults.removeObject(forKey: selectedInputDeviceIDKey)
+        }
+
+        if let commandHotkey = preferences.commandHotkey {
+            defaults.set(commandHotkey.rawValue, forKey: commandHotkeyKey)
+        } else {
+            defaults.removeObject(forKey: commandHotkeyKey)
         }
     }
 }

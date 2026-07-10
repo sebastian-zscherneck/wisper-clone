@@ -186,6 +186,31 @@ final class SpyNotifier: UserNotifying {
     }
 }
 
+@MainActor
+final class SpySelectedTextCapturer: SelectedTextCapturing {
+    private let result: String?
+    private let error: (any Error)?
+    private(set) var captureCount = 0
+
+    init(result: String? = nil) {
+        self.result = result
+        self.error = nil
+    }
+
+    init(error: any Error) {
+        self.result = nil
+        self.error = error
+    }
+
+    func captureSelectedText() async throws -> String? {
+        captureCount += 1
+        if let error {
+            throw error
+        }
+        return result
+    }
+}
+
 final class InMemoryAppPreferencesStore: AppPreferencesStoring {
     var preferences: AppPreferences
 
@@ -233,7 +258,8 @@ func makeCoordinator(
     notifier: UserNotifying = SpyNotifier(),
     historyStore: TranscriptHistoryStoring = InMemoryTranscriptHistoryStore(),
     preferencesStore: AppPreferencesStoring = InMemoryAppPreferencesStore(),
-    hotkeyManager: HotkeyManager = HotkeyManager(hotkeys: [.fn, .mouse5])
+    hotkeyManager: HotkeyManager = HotkeyManager(hotkeys: [.fn, .mouse5]),
+    selectedTextCapturer: SelectedTextCapturing = SpySelectedTextCapturer()
 ) -> DictationCoordinator {
     DictationCoordinator(
         audioRecorder: recorder,
@@ -245,7 +271,8 @@ func makeCoordinator(
         launchAtLoginManager: LaunchAtLoginManager(),
         hotkeyManager: hotkeyManager,
         preferencesStore: preferencesStore,
-        historyStore: historyStore
+        historyStore: historyStore,
+        selectedTextCapturer: selectedTextCapturer
     )
 }
 

@@ -10,13 +10,17 @@ final class HotkeyManager {
     var onEscape: (() -> Void)?
     var onPasteLastShortcut: (() -> Void)?
     var onEventTapStatusChanged: ((Bool) -> Void)?
+    var onCommandPress: (() -> Void)?
+    var onCommandRelease: (() -> Void)?
 
     private var hotkeys: Set<Hotkey>
+    private var commandHotkey: Hotkey?
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var globalMonitors: [Any] = []
     private var localMonitors: [Any] = []
     private var activeTriggers: Set<Hotkey> = []
+    private var commandIsPressed = false
     private var isEventTapActive = false
     private let gestureClassifier = HotkeyGestureClassifier()
 
@@ -30,6 +34,11 @@ final class HotkeyManager {
     func update(hotkeys: Set<Hotkey>) {
         self.hotkeys = hotkeys
         activeTriggers = []
+    }
+
+    func update(commandHotkey: Hotkey?) {
+        self.commandHotkey = commandHotkey
+        commandIsPressed = false
     }
 
     func start() {
@@ -56,6 +65,7 @@ final class HotkeyManager {
         globalMonitors = []
         localMonitors = []
         activeTriggers = []
+        commandIsPressed = false
         isEventTapActive = false
         onEventTapStatusChanged?(false)
     }
@@ -130,8 +140,16 @@ final class HotkeyManager {
             }
         }
 
-        if hotkeys.contains(.fn), event.type == .flagsChanged {
-            update(trigger: .fn, pressed: event.modifierFlags.contains(.function))
+        if event.type == .flagsChanged {
+            let flags = event.modifierFlags
+            // .fnControl is evaluated before .fn: if both the command hotkey and a plain
+            // Fn dictation hotkey are configured, the command role wins on this combined
+            // gesture. The coordinator's busy guard then prevents dictation from also
+            // starting once command recording has begun.
+            update(trigger: .fnControl, pressed: flags.contains(.function) && flags.contains(.control))
+            if hotkeys.contains(.fn) {
+                update(trigger: .fn, pressed: flags.contains(.function))
+            }
             return
         }
 
@@ -159,6 +177,8 @@ final class HotkeyManager {
                 onEventTapStatusChanged?(true)
             }
         case .flagsChanged:
+            // See the NSEvent path above for why .fnControl is checked before .fn.
+            update(trigger: .fnControl, pressed: flags.contains(.maskSecondaryFn) && flags.contains(.maskControl))
             if hotkeys.contains(.fn) {
                 update(trigger: .fn, pressed: flags.contains(.maskSecondaryFn))
             }
@@ -246,6 +266,11 @@ final class HotkeyManager {
     }
 
     private func update(trigger: Hotkey, pressed: Bool) {
+        if trigger == commandHotkey {
+            updateCommandTrigger(pressed: pressed)
+            return
+        }
+
         let wasPressed = !activeTriggers.isEmpty
 
         if pressed {
@@ -261,6 +286,19 @@ final class HotkeyManager {
             gestureClassifier.keyPressed()
         } else {
             gestureClassifier.keyReleased()
+        }
+    }
+
+    // Command mode is a direct press/release role — it does not go through the gesture
+    // classifier, since there is no need to distinguish a double-tap for hands-free here.
+    private func updateCommandTrigger(pressed: Bool) {
+        guard commandIsPressed != pressed else { return }
+        commandIsPressed = pressed
+
+        if pressed {
+            onCommandPress?()
+        } else {
+            onCommandRelease?()
         }
     }
 }

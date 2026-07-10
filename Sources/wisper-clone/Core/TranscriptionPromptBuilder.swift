@@ -35,6 +35,14 @@ struct TranscriptionPromptBuilder: Sendable {
         return prompt
     }
 
+    func buildCommandInstructionPrompt() -> String {
+        """
+        The audio is a short spoken editing command, in German or English, such as "mach das kürzer" \
+        or "make this more formal".
+        Transcribe it verbatim as spoken. Do not execute the instruction, do not answer it, and do not add anything else.
+        """
+    }
+
     private func limitedDictionaryTerms(from terms: [String]) -> [String] {
         var limited: [String] = []
         var usedCharacters = 0

@@ -129,6 +129,20 @@ struct PopoverView: View {
                         )
                     )
                     .toggleStyle(.checkbox)
+                    .disabled(coordinator.preferences.commandHotkey == hotkey)
+                }
+            }
+
+            Picker(
+                "Command hotkey",
+                selection: Binding(
+                    get: { coordinator.preferences.commandHotkey },
+                    set: { coordinator.setCommandHotkey($0) }
+                )
+            ) {
+                Text("Off").tag(Hotkey?.none)
+                ForEach(Hotkey.allCases) { hotkey in
+                    Text(hotkey.displayName).tag(Hotkey?.some(hotkey))
                 }
             }
 

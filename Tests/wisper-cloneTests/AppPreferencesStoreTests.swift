@@ -23,3 +23,41 @@ import Testing
 
     #expect(store.loadPreferences().cleanupLevel == .none)
 }
+
+@Test func preferencesStore_roundTripsCommandHotkey() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    var preferences = AppPreferences()
+    preferences.commandHotkey = .fnControl
+    store.savePreferences(preferences)
+
+    #expect(store.loadPreferences().commandHotkey == .fnControl)
+}
+
+@Test func preferencesStore_defaultsCommandHotkeyToNil() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    #expect(store.loadPreferences().commandHotkey == nil)
+}
+
+@Test func preferencesStore_clearsCommandHotkeyBackToNil() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    var preferences = AppPreferences()
+    preferences.commandHotkey = .fnControl
+    store.savePreferences(preferences)
+
+    preferences.commandHotkey = nil
+    store.savePreferences(preferences)
+
+    #expect(store.loadPreferences().commandHotkey == nil)
+}

@@ -16,11 +16,17 @@ final class DictationCoordinator: ObservableObject {
     @Published var preferences = AppPreferences() {
         didSet {
             hotkeyManager.update(hotkeys: preferences.hotkeys)
+            hotkeyManager.update(commandHotkey: preferences.commandHotkey)
             audioRecorder.selectedInputDeviceID = preferences.selectedInputDeviceID
             preferencesStore.savePreferences(preferences)
         }
     }
     var onRecordingStarted: (() -> Void)?
+
+    private enum RecordingMode {
+        case dictation
+        case command
+    }
 
     private var audioRecorder: AudioRecording
     private let transcriptionClient: TranscriptionServicing
@@ -34,7 +40,9 @@ final class DictationCoordinator: ObservableObject {
     private let personalDictionaryStore: PersonalDictionaryStore
     private let preferencesStore: AppPreferencesStoring
     private let historyStore: TranscriptHistoryStoring
+    private let selectedTextCapturer: SelectedTextCapturing
     private var pasteTargetApplication: NSRunningApplication?
+    private var recordingMode: RecordingMode = .dictation
     nonisolated(unsafe) private var deviceConnectedObserver: NSObjectProtocol?
     nonisolated(unsafe) private var deviceDisconnectedObserver: NSObjectProtocol?
 
@@ -50,7 +58,8 @@ final class DictationCoordinator: ObservableObject {
         frontmostApplicationTracker: FrontmostApplicationTracker = FrontmostApplicationTracker(),
         personalDictionaryStore: PersonalDictionaryStore = PersonalDictionaryStore(),
         preferencesStore: AppPreferencesStoring = UserDefaultsAppPreferencesStore(),
-        historyStore: TranscriptHistoryStoring = FileTranscriptHistoryStore()
+        historyStore: TranscriptHistoryStoring = FileTranscriptHistoryStore(),
+        selectedTextCapturer: SelectedTextCapturing = SelectedTextCapturer()
     ) {
         self.audioRecorder = audioRecorder
         self.transcriptionClient = transcriptionClient
@@ -64,6 +73,7 @@ final class DictationCoordinator: ObservableObject {
         self.personalDictionaryStore = personalDictionaryStore
         self.preferencesStore = preferencesStore
         self.historyStore = historyStore
+        self.selectedTextCapturer = selectedTextCapturer
 
         hasAPIKey = ((try? credentialStore.readAPIKey()) ?? nil)?.isEmpty == false
         dictionaryTerms = personalDictionaryStore.loadTerms()
@@ -72,6 +82,7 @@ final class DictationCoordinator: ObservableObject {
         preferences.launchAtLogin = launchAtLoginManager.isEnabled
         self.audioRecorder.selectedInputDeviceID = preferences.selectedInputDeviceID
         hotkeyManager.update(hotkeys: preferences.hotkeys)
+        hotkeyManager.update(commandHotkey: preferences.commandHotkey)
         inputDevices = self.audioRecorder.availableInputDevices()
         configureHotkey()
         notifier.requestPermission()
@@ -136,11 +147,20 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func beginRecording() {
+        startRecording(mode: .dictation, recordingStatusText: "Recording...")
+    }
+
+    func beginCommandRecording() {
+        startRecording(mode: .command, recordingStatusText: "Listening for command...")
+    }
+
+    private func startRecording(mode: RecordingMode, recordingStatusText: String) {
         guard phase != .recording && phase != .transcribing && phase != .pasting else { return }
         guard hasAPIKey else {
             fail(DictationError.missingAPIKey)
             return
         }
+        recordingMode = mode
         pasteTargetApplication = frontmostApplicationTracker.captureTargetApplication()
 
         Task {
@@ -153,7 +173,7 @@ final class DictationCoordinator: ObservableObject {
             do {
                 _ = try audioRecorder.startRecording()
                 phase = .recording
-                statusText = "Recording..."
+                statusText = recordingStatusText
                 onRecordingStarted?()
             } catch {
                 fail(error)
@@ -168,10 +188,16 @@ final class DictationCoordinator: ObservableObject {
         phase = .transcribing
         statusText = "Transcribing..."
 
+        let mode = recordingMode
         Task {
             do {
                 let fileURL = try await audioRecorder.stopRecording()
-                await transcribeAndPaste(fileURL: fileURL)
+                switch mode {
+                case .dictation:
+                    await transcribeAndPaste(fileURL: fileURL)
+                case .command:
+                    await runCommand(fileURL: fileURL)
+                }
             } catch {
                 fail(error)
             }
@@ -183,6 +209,7 @@ final class DictationCoordinator: ObservableObject {
         phase = .idle
         statusText = "Ready"
         isHandsFreeActive = false
+        recordingMode = .dictation
     }
 
     func retryLastPaste() {
@@ -261,6 +288,15 @@ final class DictationCoordinator: ObservableObject {
         preferences.cleanupLevel = level
     }
 
+    func setCommandHotkey(_ hotkey: Hotkey?) {
+        var updated = preferences
+        updated.commandHotkey = hotkey
+        if let hotkey, updated.hotkeys.count > 1 {
+            updated.hotkeys.remove(hotkey)
+        }
+        preferences = updated
+    }
+
     func pasteRaw(_ entry: TranscriptEntry) {
         Task {
             await paste(entry.rawText)
@@ -318,6 +354,12 @@ final class DictationCoordinator: ObservableObject {
         hotkeyManager.onPasteLastShortcut = { [weak self] in
             self?.retryLastPaste()
         }
+        hotkeyManager.onCommandPress = { [weak self] in
+            self?.beginCommandRecording()
+        }
+        hotkeyManager.onCommandRelease = { [weak self] in
+            self?.finishRecording()
+        }
     }
 
     private func transcribeAndPaste(fileURL: URL) async {
@@ -365,6 +407,54 @@ final class DictationCoordinator: ObservableObject {
             history = Array(history.prefix(FileTranscriptHistoryStore.maxEntries))
             historyStore.saveEntries(history)
             await paste(final)
+        } catch {
+            fail(error)
+        }
+    }
+
+    private func runCommand(fileURL: URL) async {
+        defer {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+
+        do {
+            guard let apiKey = try credentialStore.readAPIKey(), !apiKey.isEmpty else {
+                throw DictationError.missingAPIKey
+            }
+
+            // Activate the target app before capturing the selection, then capture it
+            // after the hotkey release — synthesizing ⌘C while the hotkey modifiers are
+            // still held would corrupt the copy shortcut.
+            await frontmostApplicationTracker.activate(pasteTargetApplication)
+            let selectedText = try await selectedTextCapturer.captureSelectedText()
+
+            let rawInstruction = try await transcriptionClient.transcribe(
+                fileURL: fileURL,
+                apiKey: apiKey,
+                prompt: TranscriptionPromptBuilder().buildCommandInstructionPrompt(),
+                language: preferences.languageMode.apiLanguageCode
+            )
+            let instruction = TextCleaner.clean(rawInstruction)
+            guard !instruction.isEmpty else {
+                throw DictationError.noInstruction
+            }
+
+            statusText = "Running command..."
+            let promptBuilder = CleanupPromptBuilder()
+            let systemPrompt = promptBuilder.buildCommandSystemPrompt(hasSelection: selectedText != nil)
+            let userMessage = promptBuilder.buildCommandUserMessage(instruction: instruction, selectedText: selectedText)
+
+            let rawResult = try await chatClient.complete(systemPrompt: systemPrompt, userMessage: userMessage, apiKey: apiKey)
+            let result = TextCleaner.clean(rawResult)
+            guard !result.isEmpty else {
+                throw DictationError.chatCompletionFailed("Empty response")
+            }
+
+            lastTranscript = result
+            history.insert(TranscriptEntry(text: result, rawText: selectedText ?? result), at: 0)
+            history = Array(history.prefix(FileTranscriptHistoryStore.maxEntries))
+            historyStore.saveEntries(history)
+            await paste(result)
         } catch {
             fail(error)
         }

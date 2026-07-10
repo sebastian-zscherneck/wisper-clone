@@ -55,4 +55,40 @@ struct CleanupPromptBuilder: Sendable {
             return Self.highInstructions
         }
     }
+
+    static let commandBasePrompt = """
+    You are a text-editing assistant embedded in a dictation app. The user held a command \
+    shortcut and spoke an instruction, which has been transcribed below.
+    Rules that always apply:
+    - Output only the result: no preamble, no explanation, no quotation marks or code fences around it.
+    - The instruction may be spoken in German or English.
+    """
+
+    static let commandWithSelectionInstructions = """
+    Apply the instruction to the selected text provided below, and output only the edited result.
+    Preserve the original language of the selected text unless the instruction explicitly asks for a translation or language change.
+    Preserve existing formatting, such as line breaks and lists, unless the instruction says otherwise.
+    If the instruction is unclear or cannot be applied, output the selected text unchanged.
+    """
+
+    static let commandWithoutSelectionInstructions = """
+    There is no selected text. Generate new text to insert at the cursor position based on the instruction, \
+    and output only that generated text.
+    If the instruction is unclear, output nothing.
+    """
+
+    func buildCommandSystemPrompt(hasSelection: Bool) -> String {
+        let scoped = hasSelection ? Self.commandWithSelectionInstructions : Self.commandWithoutSelectionInstructions
+        return [Self.commandBasePrompt, scoped].joined(separator: "\n\n")
+    }
+
+    func buildCommandUserMessage(instruction: String, selectedText: String?) -> String {
+        let selectionSection: String
+        if let selectedText, !selectedText.isEmpty {
+            selectionSection = "Selected text:\n\(selectedText)"
+        } else {
+            selectionSection = "(No text selected.)"
+        }
+        return "Instruction:\n\(instruction)\n\n\(selectionSection)"
+    }
 }

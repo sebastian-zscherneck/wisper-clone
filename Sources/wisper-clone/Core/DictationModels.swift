@@ -30,6 +30,7 @@ struct AppPreferences: Equatable, Sendable {
     var languageMode: TranscriptionLanguageMode = .bilingual
     var selectedInputDeviceID: String? = nil
     var cleanupLevel: CleanupLevel = .none
+    var commandHotkey: Hotkey? = nil
 }
 
 struct AudioInputDevice: Identifiable, Equatable, Sendable {
@@ -99,6 +100,7 @@ enum Hotkey: String, CaseIterable, Identifiable, Sendable {
     case mouse5
     case optionSpace
     case controlSpace
+    case fnControl
 
     var id: String { rawValue }
 
@@ -112,6 +114,8 @@ enum Hotkey: String, CaseIterable, Identifiable, Sendable {
             return "Option+Space hold"
         case .controlSpace:
             return "Control+Space hold"
+        case .fnControl:
+            return "Fn+Control hold"
         }
     }
 }
@@ -125,6 +129,7 @@ enum DictationError: LocalizedError, Equatable {
     case pasteFailed
     case transcriptionFailed(String)
     case chatCompletionFailed(String)
+    case noInstruction
 
     var errorDescription: String? {
         switch self {
@@ -144,6 +149,8 @@ enum DictationError: LocalizedError, Equatable {
             return message
         case .chatCompletionFailed(let message):
             return "AI processing failed: \(message)"
+        case .noInstruction:
+            return "No spoken instruction was recognized."
         }
     }
 }

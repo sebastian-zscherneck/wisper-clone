@@ -30,3 +30,29 @@ func cleanupPromptBuilder_includesLevelMarkerAndAlwaysRules(level: CleanupLevel,
 
     #expect(prompt.contains("The result will be inserted into an email"))
 }
+
+@Test func cleanupPromptBuilder_commandSystemPromptWithSelectionAppliesInstructionToSelection() {
+    let prompt = CleanupPromptBuilder().buildCommandSystemPrompt(hasSelection: true)
+
+    #expect(prompt.contains("Apply the instruction to the selected text"))
+    #expect(!prompt.contains("There is no selected text"))
+}
+
+@Test func cleanupPromptBuilder_commandSystemPromptWithoutSelectionGeneratesNewText() {
+    let prompt = CleanupPromptBuilder().buildCommandSystemPrompt(hasSelection: false)
+
+    #expect(prompt.contains("There is no selected text"))
+    #expect(!prompt.contains("Apply the instruction to the selected text"))
+}
+
+@Test func cleanupPromptBuilder_commandUserMessageWithSelectionIncludesBothParts() {
+    let message = CleanupPromptBuilder().buildCommandUserMessage(instruction: "make it shorter", selectedText: "Hello world")
+
+    #expect(message == "Instruction:\nmake it shorter\n\nSelected text:\nHello world")
+}
+
+@Test func cleanupPromptBuilder_commandUserMessageWithoutSelectionMarksNoSelection() {
+    let message = CleanupPromptBuilder().buildCommandUserMessage(instruction: "write a greeting", selectedText: nil)
+
+    #expect(message == "Instruction:\nwrite a greeting\n\n(No text selected.)")
+}
