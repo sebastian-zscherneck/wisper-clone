@@ -9,7 +9,7 @@ struct AppToneProfile: Equatable, Sendable {
         name: "Email",
         bundleIDPrefixes: ["com.apple.mail", "com.microsoft.outlook", "com.readdle.smartemail"],
         toneInstructions: """
-        The result will be inserted into an email, so the context is comparatively formal. Prefer complete sentences and paragraph breaks between topics. Keep any dictated greeting ("Hallo Frau Müller", "Hi team") and sign-off ("Viele Grüße", "Best") in place and correctly punctuated. Do not invent a greeting or sign-off that was not dictated.
+        The result will be inserted into an email, so the context is comparatively formal. Structure the text: if a greeting was dictated ("Hallo Frau Müller", "Hi team"), place it on its own line followed by an empty line. Break the body into short paragraphs separated by empty lines, one topic per paragraph. If a sign-off was dictated ("Viele Grüße", "Best"), place it on its own line at the end. Use complete sentences and correct punctuation. Do not invent a greeting or sign-off that was not dictated, and do not drop any content.
         """
     )
 
@@ -23,7 +23,7 @@ struct AppToneProfile: Equatable, Sendable {
             "net.whatsapp"
         ],
         toneInstructions: """
-        The result will be inserted into a chat message (Slack, Discord, iMessage), so the context is casual. Keep it short and conversational; lowercase sentence starts and a missing final period are fine if that matches the dictation. No greetings or sign-offs unless dictated.
+        The result will be inserted into a chat message (Slack, Discord, iMessage), so use a casual, conversational register. Lowercase sentence starts and a missing final period are fine if that matches the dictation. No greetings or sign-offs unless dictated. Casual register does NOT mean shorter: keep every point and detail the speaker made.
         """
     )
 

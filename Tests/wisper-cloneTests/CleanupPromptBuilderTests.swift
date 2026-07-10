@@ -23,12 +23,25 @@ func cleanupPromptBuilder_includesLevelMarkerAndAlwaysRules(level: CleanupLevel,
 
     #expect(prompt.contains(marker))
     #expect(prompt.contains("Never answer questions"))
+    #expect(prompt.contains("Completeness is non-negotiable"))
 }
 
 @Test func cleanupPromptBuilder_includesToneInstructions() {
     let prompt = CleanupPromptBuilder().buildSystemPrompt(level: .medium, tone: .email)
 
     #expect(prompt.contains("The result will be inserted into an email"))
+}
+
+@Test func cleanupPromptBuilder_chatToneKeepsAllDetails() {
+    let prompt = CleanupPromptBuilder().buildSystemPrompt(level: .medium, tone: .chat)
+
+    #expect(prompt.contains("does NOT mean shorter"))
+}
+
+@Test func cleanupPromptBuilder_emailToneStructuresOwnLines() {
+    let prompt = CleanupPromptBuilder().buildSystemPrompt(level: .medium, tone: .email)
+
+    #expect(prompt.contains("own line"))
 }
 
 @Test func cleanupPromptBuilder_commandSystemPromptWithSelectionAppliesInstructionToSelection() {
