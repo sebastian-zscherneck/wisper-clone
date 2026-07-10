@@ -153,8 +153,12 @@ final class HotkeyManager {
             return
         }
 
-        if hotkeys.contains(.mouse5), event.type == .otherMouseDown || event.type == .otherMouseUp {
-            handleMouse5(type: event.type, buttonNumber: event.buttonNumber)
+        if event.type == .otherMouseDown || event.type == .otherMouseUp {
+            handleMouse5(
+                type: event.type,
+                buttonNumber: event.buttonNumber,
+                shift: event.modifierFlags.contains(.shift)
+            )
             return
         }
 
@@ -207,9 +211,7 @@ final class HotkeyManager {
                 handleSpace(type: type, flags: flags, keyCode: keyCode, trigger: .controlSpace, requiredFlag: .maskControl)
             }
         case .otherMouseDown, .otherMouseUp:
-            if hotkeys.contains(.mouse5) {
-                handleMouse5(type: type, buttonNumber: mouseButtonNumber)
-            }
+            handleMouse5(type: type, buttonNumber: mouseButtonNumber, shift: flags.contains(.maskShift))
         default:
             break
         }
@@ -241,26 +243,31 @@ final class HotkeyManager {
         }
     }
 
-    private func handleMouse5(type: NSEvent.EventType, buttonNumber: Int) {
+    // Internal for tests. Shift held at press time routes the button to .shiftMouse5;
+    // the release clears both triggers so releasing Shift before the button never
+    // leaves a stuck pressed-state.
+    func handleMouse5(type: NSEvent.EventType, buttonNumber: Int, shift: Bool) {
         guard buttonNumber == 4 else { return }
 
         switch type {
         case .otherMouseDown:
-            update(trigger: .mouse5, pressed: true)
+            update(trigger: shift ? .shiftMouse5 : .mouse5, pressed: true)
         case .otherMouseUp:
+            update(trigger: .shiftMouse5, pressed: false)
             update(trigger: .mouse5, pressed: false)
         default:
             break
         }
     }
 
-    private func handleMouse5(type: CGEventType, buttonNumber: Int64) {
+    private func handleMouse5(type: CGEventType, buttonNumber: Int64, shift: Bool) {
         guard buttonNumber == 4 else { return }
 
         switch type {
         case .otherMouseDown:
-            update(trigger: .mouse5, pressed: true)
+            update(trigger: shift ? .shiftMouse5 : .mouse5, pressed: true)
         case .otherMouseUp:
+            update(trigger: .shiftMouse5, pressed: false)
             update(trigger: .mouse5, pressed: false)
         default:
             break

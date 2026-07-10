@@ -125,6 +125,7 @@ enum CleanupLevel: String, CaseIterable, Identifiable, Sendable {
 enum Hotkey: String, CaseIterable, Identifiable, Sendable {
     case fn
     case mouse5
+    case shiftMouse5
     case optionSpace
     case controlSpace
     case fnControl
@@ -137,6 +138,8 @@ enum Hotkey: String, CaseIterable, Identifiable, Sendable {
             return "Fn hold"
         case .mouse5:
             return "Mouse 5 hold"
+        case .shiftMouse5:
+            return "Shift+Mouse 5 hold"
         case .optionSpace:
             return "Option+Space hold"
         case .controlSpace:

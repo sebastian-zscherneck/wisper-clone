@@ -26,6 +26,46 @@ import Testing
 }
 
 @MainActor
+@Test func hotkeyManager_shiftMouse5RoutesToCommandRoleAndPlainMouse5ToDictation() {
+    let manager = HotkeyManager(hotkeys: [.mouse5])
+    manager.update(commandHotkey: .shiftMouse5)
+    var pressCount = 0
+    var commandPressCount = 0
+    var commandReleaseCount = 0
+    manager.onPress = { pressCount += 1 }
+    manager.onCommandPress = { commandPressCount += 1 }
+    manager.onCommandRelease = { commandReleaseCount += 1 }
+
+    // Shift+Mouse5 down/up -> command role only.
+    manager.handle(
+        typeRawValue: CGEventType.otherMouseDown.rawValue,
+        flagsRawValue: CGEventFlags.maskShift.rawValue,
+        keyCode: 0,
+        mouseButtonNumber: 4
+    )
+    #expect(commandPressCount == 1)
+    #expect(pressCount == 0)
+
+    manager.handle(
+        typeRawValue: CGEventType.otherMouseUp.rawValue,
+        flagsRawValue: 0,
+        keyCode: 0,
+        mouseButtonNumber: 4
+    )
+    #expect(commandReleaseCount == 1)
+
+    // Plain Mouse5 down -> dictation role.
+    manager.handle(
+        typeRawValue: CGEventType.otherMouseDown.rawValue,
+        flagsRawValue: 0,
+        keyCode: 0,
+        mouseButtonNumber: 4
+    )
+    #expect(pressCount == 1)
+    #expect(commandPressCount == 1)
+}
+
+@MainActor
 @Test func dictationFlow_finishRecordingResetsHandsFreeFlag() async throws {
     let audioURL = try makeTemporaryAudioFile(contents: "test audio")
     let recorder = SpyRecorder(recordedFileURL: audioURL)
