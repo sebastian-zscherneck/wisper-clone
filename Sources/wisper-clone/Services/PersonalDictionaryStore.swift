@@ -3,22 +3,13 @@ import Foundation
 struct PersonalDictionaryStore {
     private let defaults: UserDefaults
     private let key = "personalDictionaryTerms"
-    private let defaultTerms = [
-        "n8n",
-        "Claude",
-        "Sebastian Zscherneck"
-    ]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
 
     func loadTerms() -> [String] {
-        guard let saved = defaults.stringArray(forKey: key) else {
-            saveTerms(defaultTerms)
-            return defaultTerms
-        }
-        return normalize(saved)
+        normalize(defaults.stringArray(forKey: key) ?? [])
     }
 
     func saveTerms(_ terms: [String]) {

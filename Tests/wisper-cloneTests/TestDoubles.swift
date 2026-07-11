@@ -283,9 +283,10 @@ func makeCoordinator(
     preferencesStore: AppPreferencesStoring = InMemoryAppPreferencesStore(),
     hotkeyManager: HotkeyManager = HotkeyManager(hotkeys: [.fn, .mouse5]),
     selectedTextCapturer: SelectedTextCapturing = SpySelectedTextCapturer(),
-    // Fresh isolated UserDefaults suite per coordinator so parallel tests never race
-    // on shared rule state the way a bare `.standard`-backed store would.
-    personalRulesStore: PersonalRulesStore = PersonalRulesStore(defaults: UserDefaults(suiteName: "wisper-clone-test-rules-\(UUID().uuidString)")!)
+    // Fresh isolated UserDefaults suites per coordinator so parallel tests never race
+    // on shared rule/dictionary state the way bare `.standard`-backed stores would.
+    personalRulesStore: PersonalRulesStore = PersonalRulesStore(defaults: UserDefaults(suiteName: "wisper-clone-test-rules-\(UUID().uuidString)")!),
+    personalDictionaryStore: PersonalDictionaryStore = PersonalDictionaryStore(defaults: UserDefaults(suiteName: "wisper-clone-test-dictionary-\(UUID().uuidString)")!)
 ) -> DictationCoordinator {
     let coordinator = DictationCoordinator(
         audioRecorder: recorder,
@@ -296,6 +297,7 @@ func makeCoordinator(
         notifier: notifier,
         launchAtLoginManager: LaunchAtLoginManager(),
         hotkeyManager: hotkeyManager,
+        personalDictionaryStore: personalDictionaryStore,
         personalRulesStore: personalRulesStore,
         preferencesStore: preferencesStore,
         historyStore: historyStore,

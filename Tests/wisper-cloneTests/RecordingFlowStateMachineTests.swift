@@ -42,7 +42,6 @@ import Testing
             If the speaker lists multiple items, format them as a concise bullet list.
             Keep short messages short and natural; do not make casual messages overly formal.
             Keep proper nouns, product names, acronyms, and technical terms exactly when they match the audio.
-            Preferred vocabulary and spellings: n8n; Claude; Sebastian Zscherneck. Use these exact spellings only when they match the audio.
             """,
             language: nil
         )
@@ -124,7 +123,7 @@ import Testing
     recorder.currentAudioLevel = 0.8
     // A verbatim excerpt of the transcription prompt, as hallucinated on empty audio.
     let transcriber = SpyTranscriptionClient(
-        result: "Preferred vocabulary and spellings: n8n; Claude; Sebastian Zscherneck."
+        result: "Preferred vocabulary and spellings: n8n; Claude; Ada Lovelace."
     )
     let pasteboard = SpyPasteboard()
     let coordinator = makeCoordinator(
@@ -135,7 +134,7 @@ import Testing
     )
     coordinator.addDictionaryTerm("n8n")
     coordinator.addDictionaryTerm("Claude")
-    coordinator.addDictionaryTerm("Sebastian Zscherneck")
+    coordinator.addDictionaryTerm("Ada Lovelace")
 
     coordinator.beginRecording()
     try await expectPhase(.recording, in: coordinator)

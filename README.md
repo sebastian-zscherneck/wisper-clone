@@ -1,66 +1,102 @@
 # Wisper Clone
 
-A personal macOS menu bar dictation app inspired by Whisper Flow.
+A macOS menu bar dictation app inspired by Wispr Flow. Hold a global hotkey, speak, release — your words are transcribed with OpenAI and pasted into whatever app you're using. Bring your own OpenAI API key; there is no account, no backend, and no telemetry.
 
-## Current v1 behavior
+## Features
 
-- Hold a global shortcut to record.
-- Release to transcribe with OpenAI `gpt-4o-transcribe`.
-- Select the microphone used by the app without changing the system default input.
-- Prefer non-Bluetooth microphones automatically so AirPods music stays in the high-quality playback profile.
-- Use a German/English mixed dictation prompt by default, with optional German-only or English-only language hints.
-- Lightly clean the transcript.
-- Paste into the active app, or copy and notify if automatic paste cannot run.
-- Keep temporary session history until the app quits.
-- Store the OpenAI API key in macOS Keychain.
+- **Push-to-talk dictation**: hold a global shortcut (Fn, or Shift+Mouse 5) to record, release to transcribe and paste. Double-tap for hands-free mode, Esc to cancel.
+- **Command Mode**: select text anywhere, hold the command hotkey, and speak an instruction ("make this more formal", "mach das kürzer") — the AI edits the selection in place.
+- **AI cleanup levels**: from raw transcript to lightly polished text, with per-app tone (chat, email, docs) and one-shot undo of AI edits.
+- **Bilingual dictation**: the default prompt is tuned for mixed German/English speech and preserves the spoken language instead of translating. Adjust it in `TranscriptionPromptBuilder.swift` for your own language mix.
+- **Personal dictionary & rules**: teach the transcriber your names and technical terms, and set persistent rules ("never use exclamation marks") that apply to every cleanup and command.
+- **Floating Flow Bar** with live waveform, transcript history, and microphone selection that doesn't touch your system default input (and avoids switching AirPods out of their high-quality playback profile).
+- **Guarded against accidents**: silent or accidental sub-second recordings are discarded instead of hallucinated into text.
 
 ## Requirements
 
-- macOS 14 or newer.
-- Swift 6.3 or newer.
-- Full Xcode is recommended for a polished signed app workflow. The Swift package can build with Command Line Tools.
-- OpenAI API key.
+- macOS 14 or newer
+- Swift 6.3 or newer (full Xcode recommended; Command Line Tools are enough to build)
+- An OpenAI API key
 
-## Run in development
+## Your OpenAI API key
+
+The app talks directly to the OpenAI API with **your own key** — you pay OpenAI for exactly what you use.
+
+1. Create a key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (requires an API account with billing set up — note that a ChatGPT Plus/Pro subscription does **not** include API usage; API billing is separate).
+2. Launch the app, open the menu bar popover, and paste the key into the "OpenAI API key" field.
+3. The key is stored in the **macOS Keychain** — never in a file, never in UserDefaults, and it is only ever sent to `api.openai.com`.
+
+Typical dictation usage costs a few cents per day. You can set a hard spending limit in your OpenAI billing settings.
+
+### Models used
+
+| Task | Model | Defined in |
+|---|---|---|
+| Transcription (accurate) | `gpt-4o-transcribe` | `Core/DictationModels.swift` |
+| Transcription (fast) | `gpt-4o-mini-transcribe` | `Core/DictationModels.swift` |
+| Transcript cleanup | `gpt-4o-mini` | `Services/OpenAIChatClient.swift` |
+| Command Mode | `gpt-5.4-mini` | `Services/OpenAIChatClient.swift` |
+
+Change the constants in those files if you prefer different models.
+
+## Privacy & data
+
+- **Sent to OpenAI (and nowhere else):** your audio recordings, and — depending on the feature you use — the selected text (Command Mode), the frontmost app name/window title (used to pick the right tone), your dictionary terms, and your AI rules.
+- **Stored locally only:** transcript history, preferences, dictionary, and rules (UserDefaults); your API key (Keychain).
+- **No telemetry, no analytics, no third-party services.**
+
+Audio files are temporary and deleted after transcription. If you dictate confidential material, review [OpenAI's API data usage policies](https://openai.com/policies/api-data-usage-policies) first.
+
+## Build & run
+
+Development run:
 
 ```sh
 swift run WisperClone
 ```
 
-For the best permissions behavior, build a local `.app` bundle:
+For correct macOS permission behavior, build a local `.app` bundle instead:
 
 ```sh
 chmod +x Scripts/package-app.sh
 Scripts/package-app.sh --open
 ```
 
-The app will ask for microphone access when recording. Automatic paste requires enabling Accessibility access for the app in macOS Settings.
-
-## Install for Spotlight
-
-To make the app discoverable from Spotlight, install it into your user Applications folder:
+To install it into `~/Applications` and make it discoverable via Spotlight:
 
 ```sh
 Scripts/package-app.sh --install --open
 ```
 
-This copies the signed bundle to `~/Applications/Wisper Clone.app` and registers it with LaunchServices. After that, you can launch it from Spotlight by searching for `Wisper Clone`.
+The packaging script creates and reuses a local self-signed code-signing identity (`Wisper Clone Local Code Signing`). Keeping that identity stable prevents macOS privacy permissions from drifting after each rebuild.
 
-The packaging script creates and reuses a local code-signing identity named `Wisper Clone Local Code Signing`. Keeping that identity stable prevents macOS privacy permissions from drifting after each rebuild.
+### macOS permissions
 
-## Reset macOS permissions
+The app needs:
 
-During development the app is ad-hoc signed locally. After rebuilding or reinstalling, macOS can keep stale privacy toggles that look enabled but no longer match the new local build. If global shortcuts or paste stop working after a rebuild, reset and approve the permissions again:
+- **Microphone** — requested on first recording.
+- **Accessibility** — for automatic paste and reading the selection in Command Mode.
+- **Input Monitoring** — for the global hotkeys.
+
+If shortcuts or paste stop working after a rebuild (stale TCC entries), reset and re-approve:
 
 ```sh
 Scripts/reset-permissions.sh
 open "$HOME/Applications/Wisper Clone.app"
 ```
 
-Then allow the app again in Privacy & Security for Input Monitoring and Accessibility.
-
-## Test
+## Tests
 
 ```sh
 swift test
 ```
+
+On machines with only Command Line Tools (no full Xcode), use the bundled runner instead:
+
+```sh
+Scripts/run-tests.sh
+```
+
+## License
+
+[MIT](LICENSE). Not affiliated with OpenAI or Wispr.

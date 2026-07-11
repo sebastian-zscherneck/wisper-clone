@@ -18,10 +18,10 @@ import Testing
         "  n8n  ",
         "",
         "Claude",
-        " Sebastian Zscherneck\n"
+        " Ada Lovelace\n"
     ])
 
-    #expect(prompt.contains("Preferred vocabulary and spellings: n8n; Claude; Sebastian Zscherneck."))
+    #expect(prompt.contains("Preferred vocabulary and spellings: n8n; Claude; Ada Lovelace."))
     #expect(prompt.contains("Use these exact spellings only when they match the audio."))
 }
 

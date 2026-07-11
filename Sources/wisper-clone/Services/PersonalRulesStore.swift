@@ -1,8 +1,7 @@
 import Foundation
 
 /// Persists user-defined AI rules that always apply to cleanup and command
-/// prompts (e.g. "never use exclamation marks"). Unlike PersonalDictionaryStore
-/// this ships with no default rules.
+/// prompts (e.g. "never use exclamation marks"). Ships with no default rules.
 struct PersonalRulesStore {
     private let defaults: UserDefaults
     private let key = "personalAIRules"
