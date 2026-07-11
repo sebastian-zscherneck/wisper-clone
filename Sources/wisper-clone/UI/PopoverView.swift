@@ -8,23 +8,24 @@ struct PopoverView: View {
     @State private var isRecordingIndicatorExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
-            Divider()
-            setupSection
-            controlsSection
-            audioSection
-            dictionarySection
-            rulesSection
-            lastTranscriptSection
-            historySection
-            Spacer(minLength: 0)
-            footer
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                header
+                Divider()
+                setupSection
+                controlsSection
+                audioSection
+                dictionarySection
+                rulesSection
+                lastTranscriptSection
+                historySection
+                footer
+            }
+            .padding(.top, 22)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
         }
-        .padding(.top, 22)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-        .frame(width: 420, height: 740)
+        .frame(width: 420, height: 780)
         .onAppear {
             coordinator.refreshInputDevices()
             updateRecordingIndicatorAnimation()
@@ -54,18 +55,18 @@ struct PopoverView: View {
             if coordinator.phase == .recording {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(.red)
+                        .fill(recordingIndicatorColor)
                         .frame(width: 7, height: 7)
                         .scaleEffect(isRecordingIndicatorExpanded ? 1.35 : 0.85)
                         .opacity(isRecordingIndicatorExpanded ? 0.55 : 1)
                     Text("REC")
                         .font(.caption2)
                         .fontWeight(.semibold)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(recordingIndicatorColor)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(Color.red.opacity(0.12))
+                .background(recordingIndicatorColor.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
         }
@@ -529,11 +530,15 @@ struct PopoverView: View {
         case .idle:
             return .accentColor
         case .recording:
-            return .red
+            return recordingIndicatorColor
         case .transcribing, .pasting:
             return .orange
         case .failed:
             return .red
         }
+    }
+
+    private var recordingIndicatorColor: Color {
+        coordinator.isCommandRecording ? .indigo : Color(red: 0.2, green: 0.78, blue: 0.45)
     }
 }

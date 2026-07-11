@@ -55,6 +55,9 @@ final class DictationCoordinator: ObservableObject {
     private var audioLevelTimer: Timer?
     private static let maxAudioLevelSamples = 40
     private static let maxSelectionWords = 1_000
+    /// Short confirmations ("ja passt danke") don't need AI polishing —
+    /// skipping the chat call saves latency and cost.
+    private static let minimumWordsForCleanup = 6
     private static let ruleTriggerPrefixes = [
         "merke dir als regel",
         "merk dir als regel",
@@ -477,7 +480,12 @@ final class DictationCoordinator: ObservableObject {
             var final = cleaned
             var cleanupDuration = Duration.zero
 
-            if preferences.cleanupLevel != .none {
+            let rawWordCount = raw.split(whereSeparator: \.isWhitespace).count
+            if preferences.cleanupLevel == .none {
+                // Cleanup disabled; nothing to skip or run.
+            } else if rawWordCount < Self.minimumWordsForCleanup {
+                logger.debug("cleanup skipped: transcript below word threshold")
+            } else {
                 let tone = AppToneProfile.profile(
                     forBundleID: pasteTargetApplication?.bundleIdentifier,
                     windowTitle: pasteTargetWindowTitle

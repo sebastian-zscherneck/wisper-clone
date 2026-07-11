@@ -26,13 +26,43 @@ import Testing
 }
 
 @MainActor
+@Test func dictationFlow_skipsChatCleanupWhenTranscriptIsBelowWordThreshold() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
+    let chatClient = SpyChatClient(result: "unused")
+    let pasteboard = SpyPasteboard()
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: SpyTranscriptionClient(result: "ja passt danke"),
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        chatClient: chatClient,
+        preferencesStore: InMemoryAppPreferencesStore(
+            preferences: {
+                var preferences = AppPreferences()
+                preferences.cleanupLevel = .medium
+                return preferences
+            }()
+        )
+    )
+
+    coordinator.beginRecording()
+    try await expectPhase(.recording, in: coordinator)
+    coordinator.finishRecording()
+    try await expectPhase(.idle, in: coordinator)
+
+    #expect(chatClient.requests.isEmpty)
+    #expect(pasteboard.pastedTexts == ["ja passt danke"])
+    #expect(coordinator.history.first?.wasEdited == false)
+}
+
+@MainActor
 @Test func dictationFlow_polishesTranscriptWhenCleanupEnabled() async throws {
     let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
     let chatClient = SpyChatClient(result: "Polished transcript.")
     let pasteboard = SpyPasteboard()
     let coordinator = makeCoordinator(
         recorder: SpyRecorder(recordedFileURL: audioURL),
-        transcriber: SpyTranscriptionClient(result: "raw transcript"),
+        transcriber: SpyTranscriptionClient(result: "this is a raw test transcript"),
         pasteboard: pasteboard,
         credentialStore: SpyCredentialStore(apiKey: "test-key"),
         chatClient: chatClient,
@@ -52,14 +82,14 @@ import Testing
 
     #expect(chatClient.requests.count == 1)
     let userMessage = chatClient.requests.first?.userMessage ?? ""
-    #expect(userMessage.contains("<<<TRANSCRIPT\nraw transcript\nTRANSCRIPT>>>"))
+    #expect(userMessage.contains("<<<TRANSCRIPT\nthis is a raw test transcript\nTRANSCRIPT>>>"))
     #expect(userMessage.contains("not a message addressed to you"))
     #expect(chatClient.requests.first?.apiKey == "test-key")
     #expect(chatClient.requests.first?.systemPrompt.contains("Editing level: MEDIUM.") == true)
     #expect(chatClient.requests.first?.model == OpenAIChatClient.cleanupModel)
     #expect(pasteboard.pastedTexts == ["Polished transcript."])
     #expect(coordinator.history.first?.text == "Polished transcript.")
-    #expect(coordinator.history.first?.rawText == "raw transcript")
+    #expect(coordinator.history.first?.rawText == "this is a raw test transcript")
     #expect(coordinator.history.first?.wasEdited == true)
 }
 
@@ -71,7 +101,7 @@ import Testing
     let notifier = SpyNotifier()
     let coordinator = makeCoordinator(
         recorder: SpyRecorder(recordedFileURL: audioURL),
-        transcriber: SpyTranscriptionClient(result: "raw transcript"),
+        transcriber: SpyTranscriptionClient(result: "this is a raw test transcript"),
         pasteboard: pasteboard,
         credentialStore: SpyCredentialStore(apiKey: "test-key"),
         chatClient: chatClient,
@@ -91,7 +121,7 @@ import Testing
     try await expectPhase(.idle, in: coordinator)
 
     #expect(chatClient.requests.count == 1)
-    #expect(pasteboard.pastedTexts == ["raw transcript"])
+    #expect(pasteboard.pastedTexts == ["this is a raw test transcript"])
     #expect(coordinator.history.first?.wasEdited == false)
     #expect(notifier.notifications.contains(
         .init(title: "Wisper Clone", body: "AI cleanup failed — pasted raw transcript.")

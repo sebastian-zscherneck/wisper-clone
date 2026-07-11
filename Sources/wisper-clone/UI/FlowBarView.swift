@@ -83,7 +83,7 @@ struct FlowBarView: View {
     }
 
     private var recordingAccentColor: Color {
-        coordinator.isCommandRecording ? .indigo : .red
+        coordinator.isCommandRecording ? .indigo : Color(red: 0.2, green: 0.78, blue: 0.45)
     }
 
     private var failedPill: some View {
