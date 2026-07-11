@@ -7,6 +7,9 @@ protocol AppPreferencesStoring {
 
 struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     private let defaults: UserDefaults
+    private let hotkeyBindingsKey = "preferences.hotkeyBindings"
+    private let commandBindingKey = "preferences.commandBinding"
+    // Legacy keys from the removed `Hotkey` enum; read once for migration.
     private let hotkeysKey = "preferences.hotkeys"
     private let languageModeKey = "preferences.languageMode"
     private let selectedInputDeviceIDKey = "preferences.selectedInputDeviceID"
@@ -22,10 +25,14 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     func loadPreferences() -> AppPreferences {
         var preferences = AppPreferences()
 
-        if let rawHotkeys = defaults.stringArray(forKey: hotkeysKey) {
-            let hotkeys = Set(rawHotkeys.compactMap(Hotkey.init(rawValue:)))
-            if !hotkeys.isEmpty {
-                preferences.hotkeys = hotkeys
+        if let data = defaults.data(forKey: hotkeyBindingsKey),
+           let bindings = try? JSONDecoder().decode([HotkeyBinding].self, from: data),
+           !bindings.isEmpty {
+            preferences.hotkeys = bindings
+        } else if let rawHotkeys = defaults.stringArray(forKey: hotkeysKey) {
+            let bindings = rawHotkeys.compactMap(HotkeyBinding.init(legacyHotkeyRawValue:))
+            if !bindings.isEmpty {
+                preferences.hotkeys = bindings
             }
         }
 
@@ -41,8 +48,10 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
             preferences.cleanupLevel = cleanupLevel
         }
 
-        if let rawCommandHotkey = defaults.string(forKey: commandHotkeyKey) {
-            preferences.commandHotkey = Hotkey(rawValue: rawCommandHotkey)
+        if let data = defaults.data(forKey: commandBindingKey) {
+            preferences.commandHotkey = try? JSONDecoder().decode(HotkeyBinding.self, from: data)
+        } else if let rawCommandHotkey = defaults.string(forKey: commandHotkeyKey) {
+            preferences.commandHotkey = HotkeyBinding(legacyHotkeyRawValue: rawCommandHotkey)
         }
 
         if defaults.object(forKey: showFlowBarKey) != nil {
@@ -58,7 +67,9 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     }
 
     func savePreferences(_ preferences: AppPreferences) {
-        defaults.set(preferences.hotkeys.map(\.rawValue).sorted(), forKey: hotkeysKey)
+        if let data = try? JSONEncoder().encode(preferences.hotkeys) {
+            defaults.set(data, forKey: hotkeyBindingsKey)
+        }
         defaults.set(preferences.languageMode.rawValue, forKey: languageModeKey)
         defaults.set(preferences.cleanupLevel.rawValue, forKey: cleanupLevelKey)
         defaults.set(preferences.showFlowBar, forKey: showFlowBarKey)
@@ -70,10 +81,11 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
             defaults.removeObject(forKey: selectedInputDeviceIDKey)
         }
 
-        if let commandHotkey = preferences.commandHotkey {
-            defaults.set(commandHotkey.rawValue, forKey: commandHotkeyKey)
+        if let commandHotkey = preferences.commandHotkey,
+           let data = try? JSONEncoder().encode(commandHotkey) {
+            defaults.set(data, forKey: commandBindingKey)
         } else {
-            defaults.removeObject(forKey: commandHotkeyKey)
+            defaults.removeObject(forKey: commandBindingKey)
         }
     }
 }

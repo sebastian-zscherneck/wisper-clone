@@ -18,6 +18,7 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var isHandsFreeActive = false
     @Published private(set) var isCommandRecording = false
     @Published private(set) var audioLevels: [Float] = []
+    @Published private(set) var hotkeyCaptureTarget: HotkeyCaptureTarget?
     @Published var preferences = AppPreferences() {
         didSet {
             hotkeyManager.update(hotkeys: preferences.hotkeys)
@@ -382,7 +383,7 @@ final class DictationCoordinator: ObservableObject {
         preferences.transcriptionQuality = quality
     }
 
-    func setCommandHotkey(_ hotkey: Hotkey?) {
+    func setCommandHotkey(_ hotkey: HotkeyBinding?) {
         var updated = preferences
         // Refuse to hand a hotkey to both roles: if it's the only dictation hotkey,
         // removing it would leave dictation with none, so reject the selection instead.
@@ -391,9 +392,84 @@ final class DictationCoordinator: ObservableObject {
         }
         updated.commandHotkey = hotkey
         if let hotkey, updated.hotkeys.count > 1 {
-            updated.hotkeys.remove(hotkey)
+            updated.hotkeys.removeAll { $0 == hotkey }
         }
         preferences = updated
+    }
+
+    // MARK: - Hotkey capture ("click the field, press your shortcut")
+
+    enum HotkeyCaptureTarget: Equatable {
+        /// Replace the dictation binding at `index`; `nil` appends a new one.
+        case dictation(index: Int?)
+        case command
+    }
+
+    func beginHotkeyCapture(for target: HotkeyCaptureTarget) {
+        hotkeyCaptureTarget = target
+        statusText = "Press your shortcut… (Esc to cancel)"
+        hotkeyManager.beginCapture { [weak self] event in
+            self?.handleCaptureEvent(event)
+        }
+    }
+
+    func cancelHotkeyCapture() {
+        guard hotkeyCaptureTarget != nil else { return }
+        hotkeyManager.cancelCapture()
+    }
+
+    func removeDictationHotkey(at index: Int) {
+        guard preferences.hotkeys.indices.contains(index), preferences.hotkeys.count > 1 else { return }
+        var updated = preferences
+        updated.hotkeys.remove(at: index)
+        preferences = updated
+    }
+
+    private func handleCaptureEvent(_ event: HotkeyCaptureEvent) {
+        switch event {
+        case .rejected:
+            statusText = "Add a modifier to that key"
+        case .cancelled:
+            hotkeyCaptureTarget = nil
+            statusText = "Ready"
+        case .captured(let binding):
+            guard let target = hotkeyCaptureTarget else { return }
+            hotkeyCaptureTarget = nil
+            apply(binding, to: target)
+        }
+    }
+
+    private func apply(_ binding: HotkeyBinding, to target: HotkeyCaptureTarget) {
+        var updated = preferences
+
+        let replacedSlot: HotkeyBinding?
+        switch target {
+        case .dictation(let index):
+            replacedSlot = index.flatMap { updated.hotkeys.indices.contains($0) ? updated.hotkeys[$0] : nil }
+        case .command:
+            replacedSlot = updated.commandHotkey
+        }
+
+        let takenElsewhere = (updated.hotkeys.contains(binding) || updated.commandHotkey == binding)
+            && binding != replacedSlot
+        if takenElsewhere {
+            statusText = "\(binding.displayName) is already in use"
+            return
+        }
+
+        switch target {
+        case .dictation(let index):
+            if let index, updated.hotkeys.indices.contains(index) {
+                updated.hotkeys[index] = binding
+            } else {
+                updated.hotkeys.append(binding)
+            }
+        case .command:
+            updated.commandHotkey = binding
+        }
+
+        preferences = updated
+        statusText = "Hotkey set to \(binding.displayName)"
     }
 
     func pasteRaw(_ entry: TranscriptEntry) {

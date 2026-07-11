@@ -105,3 +105,48 @@ import Testing
 
     #expect(store.loadPreferences().commandHotkey == nil)
 }
+
+@Test func preferencesStore_migratesLegacyHotkeyStringsToBindings() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set(["fn", "optionSpace"], forKey: "preferences.hotkeys")
+    defaults.set("shiftMouse5", forKey: "preferences.commandHotkey")
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    let preferences = store.loadPreferences()
+
+    #expect(Set(preferences.hotkeys) == Set([HotkeyBinding.fn, .optionSpace]))
+    #expect(preferences.commandHotkey == .shiftMouse5)
+}
+
+@Test func preferencesStore_roundTripsCustomBindings() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    let custom = HotkeyBinding(trigger: .key(code: 15), modifiers: [.command, .option])
+    var preferences = AppPreferences()
+    preferences.hotkeys = [custom, .mouse5]
+    preferences.commandHotkey = HotkeyBinding(trigger: .mouseButton(number: 3), modifiers: [.control])
+    store.savePreferences(preferences)
+
+    let loaded = store.loadPreferences()
+    #expect(loaded.hotkeys == [custom, .mouse5])
+    #expect(loaded.commandHotkey == HotkeyBinding(trigger: .mouseButton(number: 3), modifiers: [.control]))
+}
+
+@Test func preferencesStore_savedBindingsWinOverLegacyStrings() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set(["controlSpace"], forKey: "preferences.hotkeys")
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    var preferences = AppPreferences()
+    preferences.hotkeys = [.mouse5]
+    store.savePreferences(preferences)
+
+    #expect(store.loadPreferences().hotkeys == [HotkeyBinding.mouse5])
+}

@@ -2,6 +2,15 @@ import AppKit
 import Carbon.HIToolbox
 import Foundation
 
+/// Outcome of a "click the field, press your keys" recording session.
+enum HotkeyCaptureEvent: Equatable {
+    case captured(HotkeyBinding)
+    case cancelled
+    /// A plain character key without modifiers was pressed — not allowed because
+    /// the binding would hijack normal typing. Capture stays active.
+    case rejected
+}
+
 @MainActor
 final class HotkeyManager {
     var onPress: (() -> Void)?
@@ -13,33 +22,52 @@ final class HotkeyManager {
     var onCommandPress: (() -> Void)?
     var onCommandRelease: (() -> Void)?
 
-    private var hotkeys: Set<Hotkey>
-    private var commandHotkey: Hotkey?
+    private var hotkeys: [HotkeyBinding]
+    private var commandHotkey: HotkeyBinding?
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var globalMonitors: [Any] = []
     private var localMonitors: [Any] = []
-    private var activeTriggers: Set<Hotkey> = []
+    private var activeTriggers: Set<HotkeyBinding> = []
     private var commandIsPressed = false
     private var isEventTapActive = false
+    private var captureHandler: ((HotkeyCaptureEvent) -> Void)?
+    private var captureHeldModifiers: HotkeyModifiers = []
     private let gestureClassifier = HotkeyGestureClassifier()
 
-    init(hotkeys: Set<Hotkey>) {
+    init(hotkeys: [HotkeyBinding]) {
         self.hotkeys = hotkeys
         gestureClassifier.onPress = { [weak self] in self?.onPress?() }
         gestureClassifier.onRelease = { [weak self] in self?.onRelease?() }
         gestureClassifier.onDoubleTap = { [weak self] in self?.onDoubleTap?() }
     }
 
-    func update(hotkeys: Set<Hotkey>) {
+    func update(hotkeys: [HotkeyBinding]) {
         self.hotkeys = hotkeys
         activeTriggers = []
     }
 
-    func update(commandHotkey: Hotkey?) {
+    func update(commandHotkey: HotkeyBinding?) {
         self.commandHotkey = commandHotkey
         commandIsPressed = false
     }
+
+    /// Routes the next key/mouse gesture into `handler` instead of triggering
+    /// recording. Character keys without modifiers are rejected (capture stays
+    /// active); Esc cancels.
+    func beginCapture(_ handler: @escaping (HotkeyCaptureEvent) -> Void) {
+        captureHandler = handler
+        captureHeldModifiers = []
+    }
+
+    func cancelCapture() {
+        guard let handler = captureHandler else { return }
+        captureHandler = nil
+        captureHeldModifiers = []
+        handler(.cancelled)
+    }
+
+    var isCapturing: Bool { captureHandler != nil }
 
     func start() {
         stop()
@@ -123,51 +151,46 @@ final class HotkeyManager {
         }
     }
 
+    // MARK: - Event normalization
+
+    private enum EventKind {
+        case flagsChanged
+        case keyDown
+        case keyUp
+        case mouseDown
+        case mouseUp
+    }
+
     private func handle(_ event: NSEvent) {
-        // Escape/paste-last are handled as plain keyDown, independent of the configured
-        // hotkeys. The event tap is `.listenOnly`, so the event also still reaches the
-        // frontmost app — an accepted limitation. When the tap is active it already
-        // delivers these one-shot shortcuts; handling them here too would fire them twice
-        // whenever this app is frontmost, so the NSEvent path only acts as the fallback.
-        if event.type == .keyDown, !isEventTapActive {
-            if event.keyCode == UInt16(kVK_Escape), event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
-                onEscape?()
-                return
-            }
-            if event.keyCode == UInt16(kVK_ANSI_V), event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [.command, .control] {
-                onPasteLastShortcut?()
-                return
-            }
+        let kind: EventKind
+        switch event.type {
+        case .flagsChanged: kind = .flagsChanged
+        case .keyDown: kind = .keyDown
+        case .keyUp: kind = .keyUp
+        case .otherMouseDown: kind = .mouseDown
+        case .otherMouseUp: kind = .mouseUp
+        default: return
         }
 
-        if event.type == .flagsChanged {
-            let flags = event.modifierFlags
-            // .fnControl is evaluated before .fn: if both the command hotkey and a plain
-            // Fn dictation hotkey are configured, the command role wins on this combined
-            // gesture. The coordinator's busy guard then prevents dictation from also
-            // starting once command recording has begun.
-            update(trigger: .fnControl, pressed: flags.contains(.function) && flags.contains(.control))
-            if hotkeys.contains(.fn) {
-                update(trigger: .fn, pressed: flags.contains(.function))
-            }
-            return
-        }
+        var modifiers: HotkeyModifiers = []
+        let flags = event.modifierFlags
+        if flags.contains(.function) { modifiers.insert(.function) }
+        if flags.contains(.control) { modifiers.insert(.control) }
+        if flags.contains(.option) { modifiers.insert(.option) }
+        if flags.contains(.shift) { modifiers.insert(.shift) }
+        if flags.contains(.command) { modifiers.insert(.command) }
 
-        if event.type == .otherMouseDown || event.type == .otherMouseUp {
-            handleMouse5(
-                type: event.type,
-                buttonNumber: event.buttonNumber,
-                shift: event.modifierFlags.contains(.shift)
-            )
-            return
-        }
-
-        if hotkeys.contains(.optionSpace) {
-            handleSpace(event, trigger: .optionSpace, requiredFlag: .option)
-        }
-        if hotkeys.contains(.controlSpace) {
-            handleSpace(event, trigger: .controlSpace, requiredFlag: .control)
-        }
+        // When the event tap is active it already delivers every event, including
+        // the one-shot Esc / paste-last shortcuts; this NSEvent path only acts as
+        // the fallback. Handling one-shots on both paths would fire them twice
+        // whenever this app is frontmost.
+        process(
+            kind: kind,
+            keyCode: kind == .keyDown || kind == .keyUp ? event.keyCode : 0,
+            mouseButton: kind == .mouseDown || kind == .mouseUp ? event.buttonNumber : 0,
+            modifiers: modifiers,
+            handleOneShots: !isEventTapActive
+        )
     }
 
     // Internal (not fileprivate) so tests can drive this exact code path — the one the
@@ -176,105 +199,162 @@ final class HotkeyManager {
         guard let type = CGEventType(rawValue: typeRawValue) else { return }
         let flags = CGEventFlags(rawValue: flagsRawValue)
 
+        let kind: EventKind
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
                 onEventTapStatusChanged?(true)
             }
-        case .flagsChanged:
-            // See the NSEvent path above for why .fnControl is checked before .fn.
-            update(trigger: .fnControl, pressed: flags.contains(.maskSecondaryFn) && flags.contains(.maskControl))
-            if hotkeys.contains(.fn) {
-                update(trigger: .fn, pressed: flags.contains(.maskSecondaryFn))
-            }
-        case .keyDown, .keyUp:
-            // Escape/paste-last are handled as plain keyDown only (no release tracking needed).
-            if type == .keyDown {
-                // Mirror the NSEvent path's .deviceIndependentFlagsMask semantics.
-                let deviceIndependentFlags = flags.intersection(
-                    [.maskCommand, .maskControl, .maskAlternate, .maskShift, .maskSecondaryFn, .maskAlphaShift]
-                )
-                if keyCode == Int64(kVK_Escape), deviceIndependentFlags.isEmpty {
+            return
+        case .flagsChanged: kind = .flagsChanged
+        case .keyDown: kind = .keyDown
+        case .keyUp: kind = .keyUp
+        case .otherMouseDown: kind = .mouseDown
+        case .otherMouseUp: kind = .mouseUp
+        default: return
+        }
+
+        var modifiers: HotkeyModifiers = []
+        if flags.contains(.maskSecondaryFn) { modifiers.insert(.function) }
+        if flags.contains(.maskControl) { modifiers.insert(.control) }
+        if flags.contains(.maskAlternate) { modifiers.insert(.option) }
+        if flags.contains(.maskShift) { modifiers.insert(.shift) }
+        if flags.contains(.maskCommand) { modifiers.insert(.command) }
+
+        process(
+            kind: kind,
+            keyCode: UInt16(truncatingIfNeeded: keyCode),
+            mouseButton: Int(mouseButtonNumber),
+            modifiers: modifiers,
+            handleOneShots: true
+        )
+    }
+
+    // MARK: - Matching
+
+    private func process(
+        kind: EventKind,
+        keyCode: UInt16,
+        mouseButton: Int,
+        modifiers: HotkeyModifiers,
+        handleOneShots: Bool
+    ) {
+        if captureHandler != nil {
+            processCapture(kind: kind, keyCode: keyCode, mouseButton: mouseButton, modifiers: modifiers)
+            return
+        }
+
+        switch kind {
+        case .keyDown:
+            if handleOneShots {
+                if keyCode == UInt16(kVK_Escape), modifiers.isEmpty {
                     onEscape?()
                     return
                 }
-                if keyCode == Int64(kVK_ANSI_V), deviceIndependentFlags == [.maskCommand, .maskControl] {
+                if keyCode == UInt16(kVK_ANSI_V), modifiers == [.command, .control] {
                     onPasteLastShortcut?()
                     return
                 }
             }
-            if hotkeys.contains(.optionSpace) {
-                handleSpace(type: type, flags: flags, keyCode: keyCode, trigger: .optionSpace, requiredFlag: .maskAlternate)
-            }
-            if hotkeys.contains(.controlSpace) {
-                handleSpace(type: type, flags: flags, keyCode: keyCode, trigger: .controlSpace, requiredFlag: .maskControl)
-            }
-        case .otherMouseDown, .otherMouseUp:
-            handleMouse5(type: type, buttonNumber: mouseButtonNumber, shift: flags.contains(.maskShift))
-        default:
-            break
-        }
-    }
-
-    private func handleSpace(_ event: NSEvent, trigger: Hotkey, requiredFlag: NSEvent.ModifierFlags) {
-        guard event.keyCode == UInt16(kVK_Space) else { return }
-
-        switch event.type {
-        case .keyDown where event.modifierFlags.contains(requiredFlag):
-            update(trigger: trigger, pressed: true)
+            press(matching: .key(code: keyCode), heldModifiers: modifiers)
         case .keyUp:
-            update(trigger: trigger, pressed: false)
-        default:
+            release(matching: .key(code: keyCode))
+        case .mouseDown:
+            press(matching: .mouseButton(number: mouseButton), heldModifiers: modifiers)
+        case .mouseUp:
+            release(matching: .mouseButton(number: mouseButton))
+        case .flagsChanged:
+            handleFlagsChanged(heldModifiers: modifiers)
+        }
+    }
+
+    private var allBindings: [HotkeyBinding] {
+        // Command first: when a gesture matches both roles, command wins.
+        (commandHotkey.map { [$0] } ?? []) + hotkeys
+    }
+
+    private func isPressed(_ binding: HotkeyBinding) -> Bool {
+        binding == commandHotkey ? commandIsPressed : activeTriggers.contains(binding)
+    }
+
+    /// Presses the bindings for `trigger` whose modifiers are all held. When several
+    /// match (e.g. Mouse 5 and Shift+Mouse 5 on a shift-click), only the most
+    /// specific ones fire.
+    private func press(matching trigger: HotkeyBinding.Trigger, heldModifiers: HotkeyModifiers) {
+        let candidates = allBindings.filter {
+            $0.trigger == trigger && heldModifiers.isSuperset(of: $0.modifiers)
+        }
+        guard let maxCount = candidates.map(\.modifiers.count).max() else { return }
+        for binding in candidates where binding.modifiers.count == maxCount {
+            update(trigger: binding, pressed: true)
+        }
+    }
+
+    /// Releases every binding for `trigger` regardless of the current modifiers, so
+    /// dropping a modifier before the key/button never leaves a stuck pressed-state.
+    private func release(matching trigger: HotkeyBinding.Trigger) {
+        for binding in allBindings where binding.trigger == trigger {
+            update(trigger: binding, pressed: false)
+        }
+    }
+
+    private func handleFlagsChanged(heldModifiers: HotkeyModifiers) {
+        let modifierBindings = allBindings.filter { $0.trigger == .modifiersOnly }
+
+        // Release pressed bindings whose chord is no longer fully held.
+        for binding in modifierBindings where isPressed(binding) && !heldModifiers.isSuperset(of: binding.modifiers) {
+            update(trigger: binding, pressed: false)
+        }
+
+        // Press new matches, most specific first. A less specific binding that is
+        // already pressed stays pressed (adding Control to a held Fn dictation key
+        // starts the Fn+Control command role without ending the Fn dictation).
+        let candidates = modifierBindings.filter {
+            !isPressed($0) && !$0.modifiers.isEmpty && heldModifiers.isSuperset(of: $0.modifiers)
+        }
+        guard let maxCount = candidates.map(\.modifiers.count).max() else { return }
+        for binding in candidates where binding.modifiers.count == maxCount {
+            update(trigger: binding, pressed: true)
+        }
+    }
+
+    private func processCapture(kind: EventKind, keyCode: UInt16, mouseButton: Int, modifiers: HotkeyModifiers) {
+        switch kind {
+        case .keyDown:
+            if keyCode == UInt16(kVK_Escape), modifiers.isEmpty {
+                finishCapture(with: .cancelled)
+                return
+            }
+            if modifiers.isEmpty, !HotkeyBinding.isFunctionKey(keyCode) {
+                captureHandler?(.rejected)
+                return
+            }
+            finishCapture(with: .captured(HotkeyBinding(trigger: .key(code: keyCode), modifiers: modifiers)))
+        case .mouseDown:
+            guard mouseButton >= 2 else { return }
+            finishCapture(with: .captured(HotkeyBinding(trigger: .mouseButton(number: mouseButton), modifiers: modifiers)))
+        case .flagsChanged:
+            if modifiers.isEmpty {
+                if !captureHeldModifiers.isEmpty {
+                    finishCapture(with: .captured(HotkeyBinding(trigger: .modifiersOnly, modifiers: captureHeldModifiers)))
+                }
+            } else {
+                captureHeldModifiers.formUnion(modifiers)
+            }
+        case .keyUp, .mouseUp:
             break
         }
     }
 
-    private func handleSpace(type: CGEventType, flags: CGEventFlags, keyCode: Int64, trigger: Hotkey, requiredFlag: CGEventFlags) {
-        guard keyCode == Int64(kVK_Space) else { return }
-
-        switch type {
-        case .keyDown where flags.contains(requiredFlag):
-            update(trigger: trigger, pressed: true)
-        case .keyUp:
-            update(trigger: trigger, pressed: false)
-        default:
-            break
-        }
+    private func finishCapture(with event: HotkeyCaptureEvent) {
+        let handler = captureHandler
+        captureHandler = nil
+        captureHeldModifiers = []
+        handler?(event)
     }
 
-    // Internal for tests. Shift held at press time routes the button to .shiftMouse5;
-    // the release clears both triggers so releasing Shift before the button never
-    // leaves a stuck pressed-state.
-    func handleMouse5(type: NSEvent.EventType, buttonNumber: Int, shift: Bool) {
-        guard buttonNumber == 4 else { return }
-
-        switch type {
-        case .otherMouseDown:
-            update(trigger: shift ? .shiftMouse5 : .mouse5, pressed: true)
-        case .otherMouseUp:
-            update(trigger: .shiftMouse5, pressed: false)
-            update(trigger: .mouse5, pressed: false)
-        default:
-            break
-        }
-    }
-
-    private func handleMouse5(type: CGEventType, buttonNumber: Int64, shift: Bool) {
-        guard buttonNumber == 4 else { return }
-
-        switch type {
-        case .otherMouseDown:
-            update(trigger: shift ? .shiftMouse5 : .mouse5, pressed: true)
-        case .otherMouseUp:
-            update(trigger: .shiftMouse5, pressed: false)
-            update(trigger: .mouse5, pressed: false)
-        default:
-            break
-        }
-    }
-
-    private func update(trigger: Hotkey, pressed: Bool) {
+    private func update(trigger: HotkeyBinding, pressed: Bool) {
         guard trigger == commandHotkey || hotkeys.contains(trigger) else { return }
 
         if trigger == commandHotkey {

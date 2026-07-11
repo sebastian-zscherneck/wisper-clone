@@ -25,12 +25,12 @@ struct TranscriptEntry: Identifiable, Equatable, Sendable, Codable {
 }
 
 struct AppPreferences: Equatable, Sendable {
-    var hotkeys: Set<Hotkey> = [.fn, .mouse5]
+    var hotkeys: [HotkeyBinding] = [.fn, .mouse5]
     var launchAtLogin: Bool = false
     var languageMode: TranscriptionLanguageMode = .bilingual
     var selectedInputDeviceID: String? = nil
     var cleanupLevel: CleanupLevel = .none
-    var commandHotkey: Hotkey? = nil
+    var commandHotkey: HotkeyBinding? = nil
     var showFlowBar: Bool = true
     var transcriptionQuality: TranscriptionQuality = .accurate
 }
@@ -118,34 +118,6 @@ enum CleanupLevel: String, CaseIterable, Identifiable, Sendable {
             return "Medium"
         case .high:
             return "High"
-        }
-    }
-}
-
-enum Hotkey: String, CaseIterable, Identifiable, Sendable {
-    case fn
-    case mouse5
-    case shiftMouse5
-    case optionSpace
-    case controlSpace
-    case fnControl
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .fn:
-            return "Fn hold"
-        case .mouse5:
-            return "Mouse 5 hold"
-        case .shiftMouse5:
-            return "Shift+Mouse 5 hold"
-        case .optionSpace:
-            return "Option+Space hold"
-        case .controlSpace:
-            return "Control+Space hold"
-        case .fnControl:
-            return "Fn+Control hold"
         }
     }
 }

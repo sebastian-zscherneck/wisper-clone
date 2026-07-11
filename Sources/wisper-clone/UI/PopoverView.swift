@@ -30,6 +30,9 @@ struct PopoverView: View {
             coordinator.refreshInputDevices()
             updateRecordingIndicatorAnimation()
         }
+        .onDisappear {
+            coordinator.cancelHotkeyCapture()
+        }
         .onChange(of: coordinator.phase) { _, _ in
             updateRecordingIndicatorAnimation()
         }
@@ -117,37 +120,48 @@ struct PopoverView: View {
                     .foregroundStyle(coordinator.isGlobalShortcutReady ? .green : .orange)
                 }
 
-                ForEach(Hotkey.allCases) { hotkey in
-                    Toggle(
-                        hotkey.displayName,
-                        isOn: Binding(
-                            get: { coordinator.preferences.hotkeys.contains(hotkey) },
-                            set: { isEnabled in
-                                if isEnabled {
-                                    coordinator.preferences.hotkeys.insert(hotkey)
-                                } else if coordinator.preferences.hotkeys.count > 1 {
-                                    coordinator.preferences.hotkeys.remove(hotkey)
-                                }
-                            }
+                ForEach(Array(coordinator.preferences.hotkeys.enumerated()), id: \.element) { index, binding in
+                    HStack {
+                        hotkeyRecorderField(
+                            display: binding.displayName,
+                            target: .dictation(index: index)
                         )
-                    )
-                    .toggleStyle(.checkbox)
-                    .disabled(coordinator.preferences.commandHotkey == hotkey)
+                        Button {
+                            coordinator.removeDictationHotkey(at: index)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove hotkey")
+                        .disabled(coordinator.preferences.hotkeys.count <= 1)
+                    }
                 }
+
+                Button {
+                    coordinator.beginHotkeyCapture(for: .dictation(index: nil))
+                } label: {
+                    Label("Add hotkey", systemImage: "plus.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .disabled(coordinator.hotkeyCaptureTarget != nil)
             }
 
-            Picker(
-                "Command hotkey",
-                selection: Binding(
-                    get: { coordinator.preferences.commandHotkey },
-                    set: { coordinator.setCommandHotkey($0) }
+            HStack {
+                Text("Command hotkey")
+                Spacer()
+                hotkeyRecorderField(
+                    display: coordinator.preferences.commandHotkey?.displayName ?? "Off",
+                    target: .command
                 )
-            ) {
-                Text("Off").tag(Hotkey?.none)
-                ForEach(Hotkey.allCases) { hotkey in
-                    Text(hotkey.displayName)
-                        .tag(Hotkey?.some(hotkey))
-                        .disabled(coordinator.preferences.hotkeys.count <= 1 && coordinator.preferences.hotkeys.contains(hotkey))
+                if coordinator.preferences.commandHotkey != nil {
+                    Button {
+                        coordinator.setCommandHotkey(nil)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Turn off command hotkey")
                 }
             }
 
@@ -480,6 +494,36 @@ struct PopoverView: View {
             }
         }
         .font(.caption)
+    }
+
+    private func hotkeyRecorderField(
+        display: String,
+        target: DictationCoordinator.HotkeyCaptureTarget
+    ) -> some View {
+        let isRecording = coordinator.hotkeyCaptureTarget == target
+        return Button {
+            if isRecording {
+                coordinator.cancelHotkeyCapture()
+            } else {
+                coordinator.beginHotkeyCapture(for: target)
+            }
+        } label: {
+            Text(isRecording ? "Press shortcut…" : display)
+                .font(.callout.monospaced())
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .frame(minWidth: 110)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isRecording ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.1))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(isRecording ? Color.accentColor : Color.secondary.opacity(0.3))
+                )
+        }
+        .buttonStyle(.plain)
+        .help(isRecording ? "Press the keys or mouse button to assign (Esc cancels)" : "Click, then press your shortcut")
     }
 
     private func addDictionaryInput() {

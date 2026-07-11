@@ -4,7 +4,8 @@ A macOS menu bar dictation app inspired by Wispr Flow. Hold a global hotkey, spe
 
 ## Features
 
-- **Push-to-talk dictation**: hold a global shortcut (Fn, or Shift+Mouse 5) to record, release to transcribe and paste. Double-tap for hands-free mode, Esc to cancel.
+- **Push-to-talk dictation**: hold a global shortcut to record, release to transcribe and paste. Double-tap for hands-free mode, Esc to cancel.
+- **Custom hotkeys**: click a shortcut field in the settings and press any key combo, bare modifier chord (like Fn), or mouse side button to assign it — separate bindings for dictation and Command Mode.
 - **Command Mode**: select text anywhere, hold the command hotkey, and speak an instruction ("make this more formal", "mach das kürzer") — the AI edits the selection in place.
 - **AI cleanup levels**: from raw transcript to lightly polished text, with per-app tone (chat, email, docs) and one-shot undo of AI edits.
 - **Bilingual dictation**: the default prompt is tuned for mixed German/English speech and preserves the spoken language instead of translating. Adjust it in `TranscriptionPromptBuilder.swift` for your own language mix.

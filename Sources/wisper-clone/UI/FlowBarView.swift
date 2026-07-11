@@ -124,6 +124,6 @@ struct FlowBarView: View {
     }
 
     private var firstHotkeyDisplayName: String {
-        coordinator.preferences.hotkeys.sorted { $0.rawValue < $1.rawValue }.first?.displayName ?? "your shortcut"
+        coordinator.preferences.hotkeys.first?.displayName ?? "your shortcut"
     }
 }
