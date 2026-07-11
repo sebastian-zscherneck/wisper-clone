@@ -8,7 +8,7 @@ struct OpenAIChatClient: ChatCompleting, Sendable {
     /// Model used for the dictation cleanup pass (fast, cheap).
     static let cleanupModel = "gpt-4o-mini"
     /// Model used for the command mode edit/generate pass (stronger reasoning).
-    static let commandModel = "gpt-5-mini"
+    static let commandModel = "gpt-5.4-mini"
 
     let endpoint: URL
     let session: URLSession
