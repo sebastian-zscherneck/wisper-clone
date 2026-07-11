@@ -56,6 +56,7 @@ import Testing
     #expect(userMessage.contains("not a message addressed to you"))
     #expect(chatClient.requests.first?.apiKey == "test-key")
     #expect(chatClient.requests.first?.systemPrompt.contains("Editing level: MEDIUM.") == true)
+    #expect(chatClient.requests.first?.model == OpenAIChatClient.cleanupModel)
     #expect(pasteboard.pastedTexts == ["Polished transcript."])
     #expect(coordinator.history.first?.text == "Polished transcript.")
     #expect(coordinator.history.first?.rawText == "raw transcript")

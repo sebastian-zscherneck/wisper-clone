@@ -1,26 +1,28 @@
 import Foundation
 
 protocol ChatCompleting: Sendable {
-    func complete(systemPrompt: String, userMessage: String, apiKey: String) async throws -> String
+    func complete(systemPrompt: String, userMessage: String, model: String, apiKey: String) async throws -> String
 }
 
 struct OpenAIChatClient: ChatCompleting, Sendable {
-    let model: String
+    /// Model used for the dictation cleanup pass (fast, cheap).
+    static let cleanupModel = "gpt-4o-mini"
+    /// Model used for the command mode edit/generate pass (stronger reasoning).
+    static let commandModel = "gpt-5-mini"
+
     let endpoint: URL
     let session: URLSession
 
     init(
-        model: String = "gpt-4o-mini",
         endpoint: URL = URL(string: "https://api.openai.com/v1/chat/completions")!,
         session: URLSession = .shared
     ) {
-        self.model = model
         self.endpoint = endpoint
         self.session = session
     }
 
-    func complete(systemPrompt: String, userMessage: String, apiKey: String) async throws -> String {
-        let request = makeRequest(systemPrompt: systemPrompt, userMessage: userMessage, apiKey: apiKey)
+    func complete(systemPrompt: String, userMessage: String, model: String, apiKey: String) async throws -> String {
+        let request = makeRequest(systemPrompt: systemPrompt, userMessage: userMessage, model: model, apiKey: apiKey)
         let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -46,15 +48,19 @@ struct OpenAIChatClient: ChatCompleting, Sendable {
         return trimmed
     }
 
-    func makeRequest(systemPrompt: String, userMessage: String, apiKey: String) -> URLRequest {
+    func makeRequest(systemPrompt: String, userMessage: String, model: String, apiKey: String) -> URLRequest {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        // gpt-5 family models only accept the default temperature and expose a
+        // reasoning_effort knob instead; older models keep the fixed temperature.
+        let isReasoningModel = model.hasPrefix("gpt-5")
         let body = OpenAIChatRequestBody(
             model: model,
-            temperature: 0.2,
+            temperature: isReasoningModel ? nil : 0.2,
+            reasoningEffort: isReasoningModel ? "minimal" : nil,
             messages: [
                 .init(role: "system", content: systemPrompt),
                 .init(role: "user", content: userMessage)
@@ -72,8 +78,22 @@ private struct OpenAIChatRequestBody: Encodable {
     }
 
     let model: String
-    let temperature: Double
+    let temperature: Double?
+    let reasoningEffort: String?
     let messages: [Message]
+
+    private enum CodingKeys: String, CodingKey {
+        case model, temperature, messages
+        case reasoningEffort = "reasoning_effort"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(model, forKey: .model)
+        try container.encodeIfPresent(temperature, forKey: .temperature)
+        try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)
+        try container.encode(messages, forKey: .messages)
+    }
 }
 
 private struct OpenAIChatCompletionResponse: Decodable {

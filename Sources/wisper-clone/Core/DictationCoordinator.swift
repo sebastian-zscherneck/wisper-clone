@@ -459,7 +459,12 @@ final class DictationCoordinator: ObservableObject {
                 let cleanupStart = clock.now
                 do {
                     let polished = TextCleaner.clean(
-                        try await chatClient.complete(systemPrompt: systemPrompt, userMessage: promptBuilder.buildCleanupUserMessage(transcript: raw), apiKey: apiKey)
+                        try await chatClient.complete(
+                            systemPrompt: systemPrompt,
+                            userMessage: promptBuilder.buildCleanupUserMessage(transcript: raw),
+                            model: OpenAIChatClient.cleanupModel,
+                            apiKey: apiKey
+                        )
                     )
                     if !polished.isEmpty {
                         final = polished
@@ -524,7 +529,12 @@ final class DictationCoordinator: ObservableObject {
             let userMessage = promptBuilder.buildCommandUserMessage(instruction: instruction, selectedText: selectedText)
 
             let chatStart = clock.now
-            let rawResult = try await chatClient.complete(systemPrompt: systemPrompt, userMessage: userMessage, apiKey: apiKey)
+            let rawResult = try await chatClient.complete(
+                systemPrompt: systemPrompt,
+                userMessage: userMessage,
+                model: OpenAIChatClient.commandModel,
+                apiKey: apiKey
+            )
             let chatDuration = clock.now - chatStart
 
             let result = TextCleaner.clean(rawResult)

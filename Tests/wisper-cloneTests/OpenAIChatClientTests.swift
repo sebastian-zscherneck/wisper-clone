@@ -2,9 +2,8 @@ import Foundation
 import Testing
 @testable import wisper_clone
 
-@Test func openAIChatClient_createsChatCompletionRequest() throws {
+@Test func openAIChatClient_createsChatCompletionRequestForNonReasoningModel() throws {
     let client = OpenAIChatClient(
-        model: "gpt-4o-mini",
         endpoint: URL(string: "https://api.openai.com/v1/chat/completions")!,
         session: .shared
     )
@@ -12,6 +11,7 @@ import Testing
     let request = client.makeRequest(
         systemPrompt: "You are a dictation post-processor.",
         userMessage: "hello world",
+        model: "gpt-4o-mini",
         apiKey: "test-key"
     )
 
@@ -24,12 +24,33 @@ import Testing
     let decoded = try JSONSerialization.jsonObject(with: body) as? [String: Any]
     #expect(decoded?["model"] as? String == "gpt-4o-mini")
     #expect(decoded?["temperature"] as? Double == 0.2)
+    #expect(decoded?["reasoning_effort"] == nil)
 
     let messages = try #require(decoded?["messages"] as? [[String: String]])
     #expect(messages == [
         ["role": "system", "content": "You are a dictation post-processor."],
         ["role": "user", "content": "hello world"]
     ])
+}
+
+@Test func openAIChatClient_createsChatCompletionRequestForReasoningModel() throws {
+    let client = OpenAIChatClient(
+        endpoint: URL(string: "https://api.openai.com/v1/chat/completions")!,
+        session: .shared
+    )
+
+    let request = client.makeRequest(
+        systemPrompt: "system",
+        userMessage: "hello world",
+        model: "gpt-5-mini",
+        apiKey: "test-key"
+    )
+
+    let body = try #require(request.httpBody)
+    let decoded = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+    #expect(decoded?["model"] as? String == "gpt-5-mini")
+    #expect(decoded?["temperature"] == nil)
+    #expect(decoded?["reasoning_effort"] as? String == "minimal")
 }
 
 @Test func openAIChatClient_parsesSuccessfulCompletionResponse() async throws {
@@ -40,7 +61,7 @@ import Testing
     )
     let client = OpenAIChatClient(endpoint: endpoint, session: makeStubbedSession())
 
-    let text = try await client.complete(systemPrompt: "system", userMessage: "raw", apiKey: "test-key")
+    let text = try await client.complete(systemPrompt: "system", userMessage: "raw", model: "gpt-4o-mini", apiKey: "test-key")
 
     #expect(text == "Polished text.")
 }
@@ -54,7 +75,7 @@ import Testing
     let client = OpenAIChatClient(endpoint: endpoint, session: makeStubbedSession())
 
     do {
-        _ = try await client.complete(systemPrompt: "system", userMessage: "raw", apiKey: "test-key")
+        _ = try await client.complete(systemPrompt: "system", userMessage: "raw", model: "gpt-4o-mini", apiKey: "test-key")
         Issue.record("Expected completion to fail")
     } catch let error as DictationError {
         #expect(error == .chatCompletionFailed("boom"))
@@ -70,7 +91,7 @@ import Testing
     let client = OpenAIChatClient(endpoint: endpoint, session: makeStubbedSession())
 
     do {
-        _ = try await client.complete(systemPrompt: "system", userMessage: "raw", apiKey: "test-key")
+        _ = try await client.complete(systemPrompt: "system", userMessage: "raw", model: "gpt-4o-mini", apiKey: "test-key")
         Issue.record("Expected completion to fail")
     } catch let error as DictationError {
         #expect(error == .chatCompletionFailed("HTTP 503"))
@@ -86,7 +107,7 @@ import Testing
     let client = OpenAIChatClient(endpoint: endpoint, session: makeStubbedSession())
 
     do {
-        _ = try await client.complete(systemPrompt: "system", userMessage: "raw", apiKey: "test-key")
+        _ = try await client.complete(systemPrompt: "system", userMessage: "raw", model: "gpt-4o-mini", apiKey: "test-key")
         Issue.record("Expected completion to fail")
     } catch let error as DictationError {
         #expect(error == .chatCompletionFailed("Empty response"))
@@ -102,7 +123,7 @@ import Testing
     let client = OpenAIChatClient(endpoint: endpoint, session: makeStubbedSession())
 
     do {
-        _ = try await client.complete(systemPrompt: "system", userMessage: "raw", apiKey: "test-key")
+        _ = try await client.complete(systemPrompt: "system", userMessage: "raw", model: "gpt-4o-mini", apiKey: "test-key")
         Issue.record("Expected completion to fail")
     } catch let error as DictationError {
         #expect(error == .chatCompletionFailed("Empty response"))

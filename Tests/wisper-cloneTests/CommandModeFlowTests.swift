@@ -29,6 +29,7 @@ import Testing
     let request = try #require(chatClient.requests.first)
     #expect(request.userMessage.contains("make it shorter"))
     #expect(request.userMessage.contains("Hello world"))
+    #expect(request.model == OpenAIChatClient.commandModel)
 
     let entry = try #require(coordinator.history.first)
     #expect(entry.text == "Hi")

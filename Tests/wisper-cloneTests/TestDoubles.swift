@@ -20,6 +20,7 @@ struct TranscriptionRequest: Equatable {
 struct ChatCompletionRequest: Equatable {
     let systemPrompt: String
     let userMessage: String
+    let model: String
     let apiKey: String
 }
 
@@ -122,9 +123,9 @@ final class SpyChatClient: ChatCompleting, @unchecked Sendable {
         self.error = error
     }
 
-    func complete(systemPrompt: String, userMessage: String, apiKey: String) async throws -> String {
+    func complete(systemPrompt: String, userMessage: String, model: String, apiKey: String) async throws -> String {
         lock.withLock {
-            storedRequests.append(.init(systemPrompt: systemPrompt, userMessage: userMessage, apiKey: apiKey))
+            storedRequests.append(.init(systemPrompt: systemPrompt, userMessage: userMessage, model: model, apiKey: apiKey))
         }
         if let error {
             throw error
