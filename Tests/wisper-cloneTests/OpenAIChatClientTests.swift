@@ -50,7 +50,7 @@ import Testing
     let decoded = try JSONSerialization.jsonObject(with: body) as? [String: Any]
     #expect(decoded?["model"] as? String == "gpt-5-mini")
     #expect(decoded?["temperature"] == nil)
-    #expect(decoded?["reasoning_effort"] as? String == "minimal")
+    #expect(decoded?["reasoning_effort"] as? String == "none")
 }
 
 @Test func openAIChatClient_parsesSuccessfulCompletionResponse() async throws {

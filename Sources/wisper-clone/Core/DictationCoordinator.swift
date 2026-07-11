@@ -754,6 +754,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func fail(_ error: Error) {
+        logger.error("dictation failed: \(error.localizedDescription, privacy: .public)")
         stopAudioLevelTimer()
         phase = .failed
         statusText = error.localizedDescription

@@ -56,11 +56,13 @@ struct OpenAIChatClient: ChatCompleting, Sendable {
 
         // gpt-5 family models only accept the default temperature and expose a
         // reasoning_effort knob instead; older models keep the fixed temperature.
+        // "none" is the lowest effort accepted since gpt-5.1 (which removed
+        // "minimal") and keeps command mode latency low.
         let isReasoningModel = model.hasPrefix("gpt-5")
         let body = OpenAIChatRequestBody(
             model: model,
             temperature: isReasoningModel ? nil : 0.2,
-            reasoningEffort: isReasoningModel ? "minimal" : nil,
+            reasoningEffort: isReasoningModel ? "none" : nil,
             messages: [
                 .init(role: "system", content: systemPrompt),
                 .init(role: "user", content: userMessage)
