@@ -53,7 +53,13 @@ final class DictationCoordinator: ObservableObject {
     private var captureGeneration = 0
     private var recordingMode: RecordingMode = .dictation
     private var audioLevelTimer: Timer?
+    private var recordingPeakLevel: Float = 0
+    private var recordingLevelSampleCount = 0
     private static let maxAudioLevelSamples = 40
+    // Below this normalized peak level a recording is treated as silence. Whisper-family
+    // models hallucinate prompt content (e.g. dictionary terms) on silent audio, so
+    // silent recordings must never reach the API.
+    private static let silencePeakThreshold: Float = 0.05
     private static let maxSelectionWords = 1_000
     /// Short confirmations ("ja passt danke") don't need AI polishing —
     /// skipping the chat call saves latency and cost.
@@ -457,6 +463,10 @@ final class DictationCoordinator: ObservableObject {
         let clock = ContinuousClock()
 
         do {
+            if recordingWasSilent {
+                logger.debug("recording skipped: no audio above silence threshold")
+                throw DictationError.emptyTranscript
+            }
             guard let apiKey = try credentialStore.readAPIKey(), !apiKey.isEmpty else {
                 throw DictationError.missingAPIKey
             }
@@ -543,6 +553,10 @@ final class DictationCoordinator: ObservableObject {
         let clock = ContinuousClock()
 
         do {
+            if recordingWasSilent {
+                logger.debug("recording skipped: no audio above silence threshold")
+                throw DictationError.emptyTranscript
+            }
             guard let apiKey = try credentialStore.readAPIKey(), !apiKey.isEmpty else {
                 throw DictationError.missingAPIKey
             }
@@ -652,6 +666,8 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func startAudioLevelTimer() {
+        recordingPeakLevel = 0
+        recordingLevelSampleCount = 0
         audioLevelTimer?.invalidate()
         audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -669,11 +685,19 @@ final class DictationCoordinator: ObservableObject {
     private func appendAudioLevelSample() {
         guard phase == .recording else { return }
         var samples = audioLevels
-        samples.append(audioRecorder.currentAudioLevel)
+        let level = audioRecorder.currentAudioLevel
+        recordingPeakLevel = max(recordingPeakLevel, level)
+        recordingLevelSampleCount += 1
+        samples.append(level)
         if samples.count > Self.maxAudioLevelSamples {
             samples.removeFirst(samples.count - Self.maxAudioLevelSamples)
         }
         audioLevels = samples
+    }
+
+    // True when level sampling ran and never rose above the silence threshold.
+    private var recordingWasSilent: Bool {
+        recordingLevelSampleCount > 0 && recordingPeakLevel < Self.silencePeakThreshold
     }
 
     private func wordCount(_ text: String) -> Int {

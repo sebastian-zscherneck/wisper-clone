@@ -92,6 +92,31 @@ import Testing
 }
 
 @MainActor
+@Test func dictationFlow_silentRecordingIsNeverTranscribed() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
+    let recorder = SpyRecorder(recordedFileURL: audioURL)
+    recorder.currentAudioLevel = 0.0
+    let transcriber = SpyTranscriptionClient(result: "hallucinated prompt echo")
+    let pasteboard = SpyPasteboard()
+    let coordinator = makeCoordinator(
+        recorder: recorder,
+        transcriber: transcriber,
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key")
+    )
+
+    coordinator.beginRecording()
+    try await expectPhase(.recording, in: coordinator)
+    try await expectAudioLevelsNonEmpty(in: coordinator)
+
+    coordinator.finishRecording()
+    try await expectPhase(.failed, in: coordinator)
+
+    #expect(transcriber.requests.isEmpty)
+    #expect(pasteboard.pastedTexts.isEmpty)
+}
+
+@MainActor
 @Test func dictationFlow_fillsAudioLevelsWhileRecordingAndClearsOnFinish() async throws {
     let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
     let recorder = SpyRecorder(recordedFileURL: audioURL)
