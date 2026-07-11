@@ -287,7 +287,7 @@ func makeCoordinator(
     // on shared rule state the way a bare `.standard`-backed store would.
     personalRulesStore: PersonalRulesStore = PersonalRulesStore(defaults: UserDefaults(suiteName: "wisper-clone-test-rules-\(UUID().uuidString)")!)
 ) -> DictationCoordinator {
-    DictationCoordinator(
+    let coordinator = DictationCoordinator(
         audioRecorder: recorder,
         transcriptionClient: transcriber,
         chatClient: chatClient,
@@ -302,6 +302,10 @@ func makeCoordinator(
         selectedTextCapturer: selectedTextCapturer,
         warmUpConnection: {} // no-op in tests: never hit the real network
     )
+    // Flow tests start and finish recordings within milliseconds; disable the
+    // accidental-tap minimum so they exercise the full pipeline.
+    coordinator.minimumRecordingDuration = .zero
+    return coordinator
 }
 
 @MainActor

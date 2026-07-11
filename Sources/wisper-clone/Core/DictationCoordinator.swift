@@ -54,6 +54,11 @@ final class DictationCoordinator: ObservableObject {
     private var recordingMode: RecordingMode = .dictation
     private var audioLevelTimer: Timer?
     private var recordingPeakLevel: Float = 0
+    private var recordingStartedAt: ContinuousClock.Instant?
+    // Recordings shorter than this are discarded without any transcription or output:
+    // accidental hotkey taps produce silent/near-empty audio that Whisper-family models
+    // answer with hallucinated prompt content. Internal so tests can lower it.
+    var minimumRecordingDuration: Duration = .seconds(1)
     private var recordingLevelSampleCount = 0
     private static let maxAudioLevelSamples = 40
     // Below this normalized peak level a recording is treated as silence. Whisper-family
@@ -225,6 +230,7 @@ final class DictationCoordinator: ObservableObject {
             do {
                 _ = try audioRecorder.startRecording()
                 phase = .recording
+                recordingStartedAt = .now
                 statusText = recordingStatusText
                 onRecordingStarted?()
                 startAudioLevelTimer()
@@ -238,6 +244,11 @@ final class DictationCoordinator: ObservableObject {
         guard phase == .recording else { return }
         isHandsFreeActive = false
         stopAudioLevelTimer()
+
+        if let startedAt = recordingStartedAt, ContinuousClock.now - startedAt < minimumRecordingDuration {
+            discardRecording(reason: "below minimum duration")
+            return
+        }
 
         phase = .transcribing
         statusText = "Transcribing..."
@@ -472,11 +483,12 @@ final class DictationCoordinator: ObservableObject {
             }
 
             let transcribeStart = clock.now
+            let prompt = transcriptionPrompt()
             let rawText = try await transcriptionClient.transcribe(
                 fileURL: fileURL,
                 apiKey: apiKey,
                 model: preferences.transcriptionQuality.modelName,
-                prompt: transcriptionPrompt(),
+                prompt: prompt,
                 language: preferences.languageMode.apiLanguageCode
             )
             let transcribeDuration = clock.now - transcribeStart
@@ -484,6 +496,15 @@ final class DictationCoordinator: ObservableObject {
             let cleaned = TextCleaner.clean(rawText)
             guard !cleaned.isEmpty else {
                 throw DictationError.emptyTranscript
+            }
+            // Whisper-family models echo prompt fragments (dictionary terms, example
+            // sentences) when the audio contains no usable speech. A transcript that is
+            // a verbatim excerpt of our own prompt is such an echo - drop it silently.
+            if cleaned.count >= 12, prompt.contains(cleaned) {
+                logger.debug("transcript discarded: verbatim prompt echo")
+                phase = .idle
+                statusText = "Ready"
+                return
             }
 
             let raw = cleaned
@@ -663,6 +684,17 @@ final class DictationCoordinator: ObservableObject {
         isHandsFreeActive = false
         isCommandRecording = false
         notifier.notify(title: "Wisper Clone", body: error.localizedDescription)
+    }
+
+    // Silently drops the current recording: no API call, no paste, no error surface.
+    private func discardRecording(reason: String) {
+        logger.debug("recording discarded: \(reason, privacy: .public)")
+        audioRecorder.cancelRecording()
+        isCommandRecording = false
+        recordingMode = .dictation
+        recordingStartedAt = nil
+        phase = .idle
+        statusText = "Ready"
     }
 
     private func startAudioLevelTimer() {

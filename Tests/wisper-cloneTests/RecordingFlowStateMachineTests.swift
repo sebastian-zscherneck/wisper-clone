@@ -92,6 +92,62 @@ import Testing
 }
 
 @MainActor
+@Test func dictationFlow_tooShortRecordingIsDiscardedWithoutOutput() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
+    let recorder = SpyRecorder(recordedFileURL: audioURL)
+    recorder.currentAudioLevel = 0.8
+    let transcriber = SpyTranscriptionClient(result: "should never appear")
+    let pasteboard = SpyPasteboard()
+    let coordinator = makeCoordinator(
+        recorder: recorder,
+        transcriber: transcriber,
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key")
+    )
+    coordinator.minimumRecordingDuration = .seconds(60)
+
+    coordinator.beginRecording()
+    try await expectPhase(.recording, in: coordinator)
+    coordinator.finishRecording()
+    try await expectPhase(.idle, in: coordinator)
+
+    #expect(coordinator.statusText == "Ready")
+    #expect(transcriber.requests.isEmpty)
+    #expect(pasteboard.pastedTexts.isEmpty)
+    #expect(recorder.events.contains(.cancel))
+}
+
+@MainActor
+@Test func dictationFlow_promptEchoTranscriptIsDiscardedWithoutOutput() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
+    let recorder = SpyRecorder(recordedFileURL: audioURL)
+    recorder.currentAudioLevel = 0.8
+    // A verbatim excerpt of the transcription prompt, as hallucinated on empty audio.
+    let transcriber = SpyTranscriptionClient(
+        result: "Preferred vocabulary and spellings: n8n; Claude; Sebastian Zscherneck."
+    )
+    let pasteboard = SpyPasteboard()
+    let coordinator = makeCoordinator(
+        recorder: recorder,
+        transcriber: transcriber,
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key")
+    )
+    coordinator.addDictionaryTerm("n8n")
+    coordinator.addDictionaryTerm("Claude")
+    coordinator.addDictionaryTerm("Sebastian Zscherneck")
+
+    coordinator.beginRecording()
+    try await expectPhase(.recording, in: coordinator)
+    coordinator.finishRecording()
+    try await expectPhase(.idle, in: coordinator)
+
+    #expect(coordinator.statusText == "Ready")
+    #expect(pasteboard.pastedTexts.isEmpty)
+    #expect(coordinator.history.isEmpty)
+}
+
+@MainActor
 @Test func dictationFlow_silentRecordingIsNeverTranscribed() async throws {
     let audioURL = try makeTemporaryAudioFile(contents: "fake audio")
     let recorder = SpyRecorder(recordedFileURL: audioURL)
