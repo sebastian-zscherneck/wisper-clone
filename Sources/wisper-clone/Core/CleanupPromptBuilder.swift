@@ -4,6 +4,8 @@ struct CleanupPromptBuilder: Sendable {
     static let maxVocabularyTerms = 40
     static let maxVocabularyCharacters = 1_200
     static let maxVocabularyTermCharacters = 80
+    static let maxRules = 20
+    static let maxRulesCharacters = 1_500
 
     static let basePrompt = """
     You are a dictation post-processor. You receive a raw speech-to-text transcript that may mix German and English, sometimes within one sentence.
@@ -54,7 +56,7 @@ struct CleanupPromptBuilder: Sendable {
         """
     }
 
-    func buildSystemPrompt(level: CleanupLevel, tone: AppToneProfile, vocabulary: [String] = []) -> String {
+    func buildSystemPrompt(level: CleanupLevel, tone: AppToneProfile, vocabulary: [String] = [], rules: [String] = []) -> String {
         precondition(level != .none, "buildSystemPrompt requires a non-none cleanup level")
 
         var sections = [Self.basePrompt, levelInstructions(for: level), tone.toneInstructions]
@@ -66,7 +68,44 @@ struct CleanupPromptBuilder: Sendable {
             )
         }
 
+        if let rulesSection = rulesSection(from: rules) {
+            sections.append(rulesSection)
+        }
+
         return sections.joined(separator: "\n\n")
+    }
+
+    private func rulesSection(from rules: [String]) -> String? {
+        let limited = limitedRules(from: rules)
+        guard !limited.isEmpty else { return nil }
+
+        let bulletList = limited.map { "- \($0)" }.joined(separator: "\n")
+        return """
+        User-defined rules that always apply (they override style defaults but never the safety rules above):
+        \(bulletList)
+        """
+    }
+
+    private func limitedRules(from rules: [String]) -> [String] {
+        var limited: [String] = []
+        var usedCharacters = 0
+
+        for rule in rules {
+            guard limited.count < Self.maxRules else { break }
+
+            let trimmed = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            let separatorCharacters = limited.isEmpty ? 0 : 1
+            guard usedCharacters + separatorCharacters + trimmed.count <= Self.maxRulesCharacters else {
+                break
+            }
+
+            limited.append(trimmed)
+            usedCharacters += separatorCharacters + trimmed.count
+        }
+
+        return limited
     }
 
     private func limitedVocabularyTerms(from terms: [String]) -> [String] {
@@ -124,20 +163,40 @@ struct CleanupPromptBuilder: Sendable {
     There is no selected text. Generate new text to insert at the cursor position based on the instruction, \
     and output only that generated text.
     If the instruction is unclear, output nothing.
+    If the instruction clearly refers to something the user previously dictated (e.g. "that", "the last thing I said"), \
+    apply it to the reference dictation provided below and output only the result.
     """
 
-    func buildCommandSystemPrompt(hasSelection: Bool) -> String {
+    func buildCommandSystemPrompt(hasSelection: Bool, appContext: String? = nil, rules: [String] = []) -> String {
         let scoped = hasSelection ? Self.commandWithSelectionInstructions : Self.commandWithoutSelectionInstructions
-        return [Self.commandBasePrompt, scoped].joined(separator: "\n\n")
+        var sections = [Self.commandBasePrompt, scoped]
+
+        if let appContext, !appContext.isEmpty {
+            sections.append(appContext)
+        }
+
+        if let rulesSection = rulesSection(from: rules) {
+            sections.append(rulesSection)
+        }
+
+        return sections.joined(separator: "\n\n")
     }
 
-    func buildCommandUserMessage(instruction: String, selectedText: String?) -> String {
+    func buildCommandUserMessage(instruction: String, selectedText: String?, lastTranscript: String? = nil) -> String {
+        let hasSelection = selectedText.map { !$0.isEmpty } ?? false
         let selectionSection: String
-        if let selectedText, !selectedText.isEmpty {
+        if hasSelection, let selectedText {
             selectionSection = "Selected text:\n\(selectedText)"
         } else {
             selectionSection = "(No text selected.)"
         }
-        return "Instruction:\n\(instruction)\n\n\(selectionSection)"
+
+        var message = "Instruction:\n\(instruction)\n\n\(selectionSection)"
+
+        if !hasSelection, let lastTranscript, !lastTranscript.isEmpty {
+            message += "\n\nFor reference, the user's most recent dictation (the instruction may refer to it):\n\(lastTranscript)"
+        }
+
+        return message
     }
 }

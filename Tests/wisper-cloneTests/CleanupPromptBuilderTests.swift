@@ -104,3 +104,67 @@ func cleanupPromptBuilder_includesLevelMarkerAndAlwaysRules(level: CleanupLevel,
 
     #expect(message == "Instruction:\nwrite a greeting\n\n(No text selected.)")
 }
+
+@Test func cleanupPromptBuilder_includesRulesWhenProvided() {
+    let prompt = CleanupPromptBuilder().buildSystemPrompt(level: .medium, tone: .neutral, rules: ["never use exclamation marks", "always say hi"])
+
+    #expect(prompt.contains("User-defined rules that always apply"))
+    #expect(prompt.contains("- never use exclamation marks"))
+    #expect(prompt.contains("- always say hi"))
+}
+
+@Test func cleanupPromptBuilder_omitsRulesBlockWhenEmpty() {
+    let prompt = CleanupPromptBuilder().buildSystemPrompt(level: .medium, tone: .neutral, rules: [])
+
+    #expect(!prompt.contains("User-defined rules"))
+}
+
+@Test func cleanupPromptBuilder_capsRulesAtMaxCount() {
+    let rules = (0..<30).map { "rule\($0)" }
+    let prompt = CleanupPromptBuilder().buildSystemPrompt(level: .medium, tone: .neutral, rules: rules)
+
+    #expect(prompt.contains("rule0"))
+    #expect(prompt.contains("rule19"))
+    #expect(!prompt.contains("rule20"))
+}
+
+@Test func cleanupPromptBuilder_commandSystemPromptIncludesRulesAndAppContext() {
+    let prompt = CleanupPromptBuilder().buildCommandSystemPrompt(
+        hasSelection: true,
+        appContext: "Context: the result will be inserted into Mail (window: \"Compose\"). Match the conventions of that context.",
+        rules: ["never use exclamation marks"]
+    )
+
+    #expect(prompt.contains("Context: the result will be inserted into Mail"))
+    #expect(prompt.contains("User-defined rules that always apply"))
+    #expect(prompt.contains("- never use exclamation marks"))
+}
+
+@Test func cleanupPromptBuilder_commandSystemPromptOmitsAppContextAndRulesWhenAbsent() {
+    let prompt = CleanupPromptBuilder().buildCommandSystemPrompt(hasSelection: true)
+
+    #expect(!prompt.contains("Context: the result will be inserted into"))
+    #expect(!prompt.contains("User-defined rules"))
+}
+
+@Test func cleanupPromptBuilder_commandUserMessageWithoutSelectionIncludesLastTranscript() {
+    let message = CleanupPromptBuilder().buildCommandUserMessage(
+        instruction: "make it more formal",
+        selectedText: nil,
+        lastTranscript: "the meeting is at 3pm"
+    )
+
+    #expect(message.contains("For reference, the user's most recent dictation"))
+    #expect(message.contains("the meeting is at 3pm"))
+}
+
+@Test func cleanupPromptBuilder_commandUserMessageWithSelectionOmitsLastTranscript() {
+    let message = CleanupPromptBuilder().buildCommandUserMessage(
+        instruction: "make it shorter",
+        selectedText: "Hello world",
+        lastTranscript: "the meeting is at 3pm"
+    )
+
+    #expect(!message.contains("For reference"))
+    #expect(!message.contains("the meeting is at 3pm"))
+}

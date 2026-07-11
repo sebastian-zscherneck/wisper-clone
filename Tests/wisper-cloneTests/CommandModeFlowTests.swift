@@ -181,3 +181,155 @@ import Testing
     #expect(pasteboard.pastedTexts.isEmpty)
     #expect(!FileManager.default.fileExists(atPath: audioURL.path))
 }
+
+@MainActor
+@Test func commandFlow_selectionOver1000WordsFailsWithoutChatRequest() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "command long selection")
+    let pasteboard = SpyPasteboard()
+    let chatClient = SpyChatClient(result: "should never be sent")
+    let longSelection = Array(repeating: "word", count: 1_001).joined(separator: " ")
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: SpyTranscriptionClient(result: "make it shorter"),
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        chatClient: chatClient,
+        selectedTextCapturer: SpySelectedTextCapturer(result: longSelection)
+    )
+
+    coordinator.beginCommandRecording()
+    try await expectPhase(.recording, in: coordinator)
+    coordinator.finishRecording()
+    try await expectPhase(.failed, in: coordinator)
+
+    #expect(coordinator.statusText == DictationError.selectionTooLong.errorDescription)
+    #expect(chatClient.requests.isEmpty)
+    #expect(pasteboard.pastedTexts.isEmpty)
+}
+
+@MainActor
+@Test func commandFlow_voiceRuleAdditionSavesRuleWithoutChatRequestOrPaste() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "command voice rule")
+    let pasteboard = SpyPasteboard()
+    let chatClient = SpyChatClient(result: "should never be sent")
+    let notifier = SpyNotifier()
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: SpyTranscriptionClient(result: "Merke dir als Regel: nie Ausrufezeichen"),
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        chatClient: chatClient,
+        notifier: notifier,
+        selectedTextCapturer: SpySelectedTextCapturer(result: nil)
+    )
+
+    coordinator.beginCommandRecording()
+    try await expectPhase(.recording, in: coordinator)
+    coordinator.finishRecording()
+    try await expectPhase(.idle, in: coordinator)
+
+    #expect(coordinator.rules == ["nie Ausrufezeichen"])
+    #expect(coordinator.statusText == "Regel gespeichert")
+    #expect(chatClient.requests.isEmpty)
+    #expect(pasteboard.pastedTexts.isEmpty)
+    #expect(notifier.notifications.contains { $0.body == "nie Ausrufezeichen" })
+}
+
+@MainActor
+@Test func commandFlow_normalInstructionIsUnaffectedByRuleTriggerCheck() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "command normal instruction")
+    let pasteboard = SpyPasteboard()
+    let chatClient = SpyChatClient(result: "Hi")
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: SpyTranscriptionClient(result: "make it shorter"),
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        chatClient: chatClient,
+        selectedTextCapturer: SpySelectedTextCapturer(result: "Hello world")
+    )
+
+    coordinator.beginCommandRecording()
+    try await expectPhase(.recording, in: coordinator)
+    coordinator.finishRecording()
+    try await expectPasteCount(1, in: pasteboard)
+
+    #expect(chatClient.requests.count == 1)
+    #expect(coordinator.rules.isEmpty)
+}
+
+@MainActor
+@Test func commandFlow_withoutSelectionIncludesLastTranscriptReferenceInUserMessage() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "dictation then command")
+    let pasteboard = SpyPasteboard()
+    let chatClient = SpyChatClient(result: "Generated text")
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: SequencedTranscriptionClient(results: ["the meeting is at 3pm", "write a follow-up about that"]),
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        chatClient: chatClient,
+        selectedTextCapturer: SpySelectedTextCapturer(result: nil)
+    )
+
+    // First, a plain dictation populates lastTranscript.
+    coordinator.beginRecording()
+    try await expectPhase(.recording, in: coordinator)
+    coordinator.finishRecording()
+    try await expectPasteCount(1, in: pasteboard)
+    #expect(coordinator.lastTranscript == "the meeting is at 3pm")
+
+    // Then a no-selection command should reference that last dictation.
+    coordinator.beginCommandRecording()
+    try await expectPhase(.recording, in: coordinator)
+    coordinator.finishRecording()
+    try await expectPasteCount(2, in: pasteboard)
+
+    let request = try #require(chatClient.requests.first)
+    #expect(request.userMessage.contains("For reference, the user's most recent dictation"))
+    #expect(request.userMessage.contains("the meeting is at 3pm"))
+}
+
+@MainActor
+@Test func commandFlow_isCommandRecordingTrueWhileRecordingAndFalseAfterFinish() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "command recording flag")
+    let pasteboard = SpyPasteboard()
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: SpyTranscriptionClient(result: "make it shorter"),
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        chatClient: SpyChatClient(result: "Hi"),
+        selectedTextCapturer: SpySelectedTextCapturer(result: "Hello world")
+    )
+
+    #expect(!coordinator.isCommandRecording)
+
+    coordinator.beginCommandRecording()
+    try await expectPhase(.recording, in: coordinator)
+    #expect(coordinator.isCommandRecording)
+
+    coordinator.finishRecording()
+    try await expectPasteCount(1, in: pasteboard)
+    #expect(!coordinator.isCommandRecording)
+}
+
+@MainActor
+@Test func dictationFlow_isCommandRecordingStaysFalseForPlainDictation() async throws {
+    let audioURL = try makeTemporaryAudioFile(contents: "plain dictation flag")
+    let pasteboard = SpyPasteboard()
+    let coordinator = makeCoordinator(
+        recorder: SpyRecorder(recordedFileURL: audioURL),
+        transcriber: SpyTranscriptionClient(result: "hello"),
+        pasteboard: pasteboard,
+        credentialStore: SpyCredentialStore(apiKey: "test-key")
+    )
+
+    coordinator.beginRecording()
+    try await expectPhase(.recording, in: coordinator)
+    #expect(!coordinator.isCommandRecording)
+
+    coordinator.finishRecording()
+    try await expectPasteCount(1, in: pasteboard)
+    #expect(!coordinator.isCommandRecording)
+}

@@ -13,8 +13,10 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var hasAPIKey = false
     @Published private(set) var isGlobalShortcutReady = false
     @Published private(set) var dictionaryTerms: [String] = []
+    @Published private(set) var rules: [String] = []
     @Published private(set) var inputDevices: [AudioInputDevice] = []
     @Published private(set) var isHandsFreeActive = false
+    @Published private(set) var isCommandRecording = false
     @Published private(set) var audioLevels: [Float] = []
     @Published var preferences = AppPreferences() {
         didSet {
@@ -41,6 +43,7 @@ final class DictationCoordinator: ObservableObject {
     private let hotkeyManager: HotkeyManager
     private let frontmostApplicationTracker: FrontmostApplicationTracker
     private let personalDictionaryStore: PersonalDictionaryStore
+    private let personalRulesStore: PersonalRulesStore
     private let preferencesStore: AppPreferencesStoring
     private let historyStore: TranscriptHistoryStoring
     private let selectedTextCapturer: SelectedTextCapturing
@@ -51,6 +54,15 @@ final class DictationCoordinator: ObservableObject {
     private var recordingMode: RecordingMode = .dictation
     private var audioLevelTimer: Timer?
     private static let maxAudioLevelSamples = 40
+    private static let maxSelectionWords = 1_000
+    private static let ruleTriggerPrefixes = [
+        "merke dir als regel",
+        "merk dir als regel",
+        "neue regel",
+        "add a rule",
+        "remember the rule",
+        "save the rule"
+    ]
     nonisolated(unsafe) private var deviceConnectedObserver: NSObjectProtocol?
     nonisolated(unsafe) private var deviceDisconnectedObserver: NSObjectProtocol?
 
@@ -65,6 +77,7 @@ final class DictationCoordinator: ObservableObject {
         hotkeyManager: HotkeyManager = HotkeyManager(hotkeys: [.fn, .mouse5]),
         frontmostApplicationTracker: FrontmostApplicationTracker = FrontmostApplicationTracker(),
         personalDictionaryStore: PersonalDictionaryStore = PersonalDictionaryStore(),
+        personalRulesStore: PersonalRulesStore = PersonalRulesStore(),
         preferencesStore: AppPreferencesStoring = UserDefaultsAppPreferencesStore(),
         historyStore: TranscriptHistoryStoring = FileTranscriptHistoryStore(),
         selectedTextCapturer: SelectedTextCapturing = SelectedTextCapturer(),
@@ -80,6 +93,7 @@ final class DictationCoordinator: ObservableObject {
         self.hotkeyManager = hotkeyManager
         self.frontmostApplicationTracker = frontmostApplicationTracker
         self.personalDictionaryStore = personalDictionaryStore
+        self.personalRulesStore = personalRulesStore
         self.preferencesStore = preferencesStore
         self.historyStore = historyStore
         self.selectedTextCapturer = selectedTextCapturer
@@ -87,6 +101,7 @@ final class DictationCoordinator: ObservableObject {
 
         hasAPIKey = ((try? credentialStore.readAPIKey()) ?? nil)?.isEmpty == false
         dictionaryTerms = personalDictionaryStore.loadTerms()
+        rules = personalRulesStore.loadRules()
         history = historyStore.loadEntries()
         preferences = preferencesStore.loadPreferences()
         preferences.launchAtLogin = launchAtLoginManager.isEnabled
@@ -171,6 +186,7 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         recordingMode = mode
+        isCommandRecording = (mode == .command)
         let targetApplication = frontmostApplicationTracker.captureTargetApplication()
         pasteTargetApplication = targetApplication
         pasteTargetWindowTitle = nil
@@ -242,6 +258,7 @@ final class DictationCoordinator: ObservableObject {
         phase = .idle
         statusText = "Ready"
         isHandsFreeActive = false
+        isCommandRecording = false
         recordingMode = .dictation
     }
 
@@ -288,6 +305,25 @@ final class DictationCoordinator: ObservableObject {
         personalDictionaryStore.saveTerms(dictionaryTerms)
         dictionaryTerms = personalDictionaryStore.loadTerms()
         statusText = "Dictionary updated"
+    }
+
+    func addRule(_ rule: String) {
+        let trimmed = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        rules.append(trimmed)
+        personalRulesStore.saveRules(rules)
+        rules = personalRulesStore.loadRules()
+        statusText = "Rules updated"
+    }
+
+    func removeRule(_ rule: String) {
+        let identity = rule.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        rules.removeAll {
+            $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) == identity
+        }
+        personalRulesStore.saveRules(rules)
+        rules = personalRulesStore.loadRules()
+        statusText = "Rules updated"
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -454,7 +490,8 @@ final class DictationCoordinator: ObservableObject {
                 let systemPrompt = promptBuilder.buildSystemPrompt(
                     level: preferences.cleanupLevel,
                     tone: tone,
-                    vocabulary: dictionaryTerms
+                    vocabulary: dictionaryTerms,
+                    rules: rules
                 )
                 let cleanupStart = clock.now
                 do {
@@ -508,6 +545,10 @@ final class DictationCoordinator: ObservableObject {
             await frontmostApplicationTracker.activate(pasteTargetApplication)
             let selectedText = try await selectedTextCapturer.captureSelectedText()
 
+            if let selectedText, wordCount(selectedText) > Self.maxSelectionWords {
+                throw DictationError.selectionTooLong
+            }
+
             let transcribeStart = clock.now
             let rawInstruction = try await transcriptionClient.transcribe(
                 fileURL: fileURL,
@@ -523,10 +564,27 @@ final class DictationCoordinator: ObservableObject {
                 throw DictationError.noInstruction
             }
 
+            if let newRule = ruleAddition(in: instruction) {
+                addRule(newRule)
+                statusText = "Regel gespeichert"
+                notifier.notify(title: "Wisper Clone", body: newRule)
+                isCommandRecording = false
+                phase = .idle
+                return
+            }
+
             statusText = "Running command..."
             let promptBuilder = CleanupPromptBuilder()
-            let systemPrompt = promptBuilder.buildCommandSystemPrompt(hasSelection: selectedText != nil)
-            let userMessage = promptBuilder.buildCommandUserMessage(instruction: instruction, selectedText: selectedText)
+            let systemPrompt = promptBuilder.buildCommandSystemPrompt(
+                hasSelection: selectedText != nil,
+                appContext: commandAppContext(),
+                rules: rules
+            )
+            let userMessage = promptBuilder.buildCommandUserMessage(
+                instruction: instruction,
+                selectedText: selectedText,
+                lastTranscript: lastTranscript
+            )
 
             let chatStart = clock.now
             let rawResult = try await chatClient.complete(
@@ -566,11 +624,13 @@ final class DictationCoordinator: ObservableObject {
             try await paster.paste(text)
             phase = .idle
             statusText = "Ready"
+            isCommandRecording = false
         } catch {
             paster.copy(text)
             phase = .failed
             statusText = "Copied instead of pasted"
             notifier.notify(title: "Wisper Clone", body: error.localizedDescription)
+            isCommandRecording = false
         }
     }
 
@@ -579,6 +639,7 @@ final class DictationCoordinator: ObservableObject {
         phase = .failed
         statusText = error.localizedDescription
         isHandsFreeActive = false
+        isCommandRecording = false
         notifier.notify(title: "Wisper Clone", body: error.localizedDescription)
     }
 
@@ -605,6 +666,36 @@ final class DictationCoordinator: ObservableObject {
             samples.removeFirst(samples.count - Self.maxAudioLevelSamples)
         }
         audioLevels = samples
+    }
+
+    private func wordCount(_ text: String) -> Int {
+        text.split(whereSeparator: { $0.isWhitespace }).count
+    }
+
+    /// Deterministic prefix matching for "remember this as a rule" voice commands —
+    /// intentionally not LLM-based so it never depends on network availability.
+    private func ruleAddition(in instruction: String) -> String? {
+        let lowered = instruction.lowercased()
+        guard let prefix = Self.ruleTriggerPrefixes.first(where: { lowered.hasPrefix($0) }) else {
+            return nil
+        }
+
+        let startIndex = instruction.index(instruction.startIndex, offsetBy: prefix.count)
+        var rest = String(instruction[startIndex...])
+        while let first = rest.first, first.isWhitespace || ":,;.-".contains(first) {
+            rest.removeFirst()
+        }
+
+        guard !rest.isEmpty else { return nil }
+        return rest
+    }
+
+    private func commandAppContext() -> String? {
+        guard let appName = pasteTargetApplication?.localizedName else { return nil }
+        if let windowTitle = pasteTargetWindowTitle, !windowTitle.isEmpty {
+            return "Context: the result will be inserted into \(appName) (window: \"\(windowTitle)\"). Match the conventions of that context."
+        }
+        return "Context: the result will be inserted into \(appName). Match the conventions of that context."
     }
 
     private func transcriptionPrompt() -> String {

@@ -103,6 +103,26 @@ final class SpyTranscriptionClient: TranscriptionServicing, @unchecked Sendable 
     }
 }
 
+/// Returns a different canned result on each successive call — useful for flows that
+/// transcribe twice in one test (e.g. a dictation followed by a command).
+final class SequencedTranscriptionClient: TranscriptionServicing, @unchecked Sendable {
+    private let results: [String]
+    private let lock = NSLock()
+    private var callIndex = 0
+
+    init(results: [String]) {
+        self.results = results
+    }
+
+    func transcribe(fileURL: URL, apiKey: String, model: String, prompt: String?, language: String?) async throws -> String {
+        lock.withLock {
+            let result = results[min(callIndex, results.count - 1)]
+            callIndex += 1
+            return result
+        }
+    }
+}
+
 final class SpyChatClient: ChatCompleting, @unchecked Sendable {
     private let result: String
     private let error: (any Error)?
@@ -262,7 +282,10 @@ func makeCoordinator(
     historyStore: TranscriptHistoryStoring = InMemoryTranscriptHistoryStore(),
     preferencesStore: AppPreferencesStoring = InMemoryAppPreferencesStore(),
     hotkeyManager: HotkeyManager = HotkeyManager(hotkeys: [.fn, .mouse5]),
-    selectedTextCapturer: SelectedTextCapturing = SpySelectedTextCapturer()
+    selectedTextCapturer: SelectedTextCapturing = SpySelectedTextCapturer(),
+    // Fresh isolated UserDefaults suite per coordinator so parallel tests never race
+    // on shared rule state the way a bare `.standard`-backed store would.
+    personalRulesStore: PersonalRulesStore = PersonalRulesStore(defaults: UserDefaults(suiteName: "wisper-clone-test-rules-\(UUID().uuidString)")!)
 ) -> DictationCoordinator {
     DictationCoordinator(
         audioRecorder: recorder,
@@ -273,6 +296,7 @@ func makeCoordinator(
         notifier: notifier,
         launchAtLoginManager: LaunchAtLoginManager(),
         hotkeyManager: hotkeyManager,
+        personalRulesStore: personalRulesStore,
         preferencesStore: preferencesStore,
         historyStore: historyStore,
         selectedTextCapturer: selectedTextCapturer,

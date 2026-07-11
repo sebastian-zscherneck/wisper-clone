@@ -160,6 +160,7 @@ enum DictationError: LocalizedError, Equatable {
     case transcriptionFailed(String)
     case chatCompletionFailed(String)
     case noInstruction
+    case selectionTooLong
 
     var errorDescription: String? {
         switch self {
@@ -181,6 +182,8 @@ enum DictationError: LocalizedError, Equatable {
             return "AI processing failed: \(message)"
         case .noInstruction:
             return "No spoken instruction was recognized."
+        case .selectionTooLong:
+            return "Selection is too long to edit — try again with under 1,000 words."
         }
     }
 }

@@ -52,6 +52,11 @@ struct FlowBarView: View {
         expandedPill {
             HStack(spacing: 8) {
                 waveform
+                if coordinator.isCommandRecording {
+                    Image(systemName: "wand.and.stars")
+                        .font(.caption)
+                        .foregroundStyle(.white)
+                }
                 if coordinator.isHandsFreeActive {
                     Image(systemName: "infinity")
                         .font(.caption)
@@ -61,7 +66,7 @@ struct FlowBarView: View {
         }
         .overlay(
             Capsule()
-                .strokeBorder(Color.red.opacity(0.8), lineWidth: 1.5)
+                .strokeBorder(recordingAccentColor.opacity(0.8), lineWidth: 1.5)
         )
     }
 
@@ -71,6 +76,14 @@ struct FlowBarView: View {
                 .controlSize(.small)
                 .tint(.white)
         }
+        .overlay(
+            Capsule()
+                .strokeBorder(coordinator.isCommandRecording ? Color.indigo.opacity(0.8) : Color.clear, lineWidth: 1.5)
+        )
+    }
+
+    private var recordingAccentColor: Color {
+        coordinator.isCommandRecording ? .indigo : .red
     }
 
     private var failedPill: some View {
@@ -89,7 +102,7 @@ struct FlowBarView: View {
         HStack(spacing: 3) {
             ForEach(Array(waveformSamples.enumerated()), id: \.offset) { _, level in
                 Capsule()
-                    .fill(Color.red)
+                    .fill(recordingAccentColor)
                     .frame(width: 3, height: max(4, CGFloat(level) * 24))
             }
         }

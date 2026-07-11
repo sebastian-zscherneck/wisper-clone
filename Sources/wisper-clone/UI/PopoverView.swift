@@ -4,6 +4,7 @@ struct PopoverView: View {
     @ObservedObject var coordinator: DictationCoordinator
     @State private var apiKeyInput = ""
     @State private var dictionaryInput = ""
+    @State private var ruleInput = ""
     @State private var isRecordingIndicatorExpanded = false
 
     var body: some View {
@@ -14,6 +15,7 @@ struct PopoverView: View {
             controlsSection
             audioSection
             dictionarySection
+            rulesSection
             lastTranscriptSection
             historySection
             Spacer(minLength: 0)
@@ -366,6 +368,52 @@ struct PopoverView: View {
         }
     }
 
+    private var rulesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("AI Rules")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+
+            HStack {
+                TextField("Add a rule (e.g. never use exclamation marks)", text: $ruleInput)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(addRuleInput)
+
+                Button {
+                    addRuleInput()
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .help("Add rule")
+                .disabled(ruleInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(coordinator.rules, id: \.self) { rule in
+                        HStack(spacing: 4) {
+                            Text(rule)
+                                .lineLimit(1)
+                            Button {
+                                coordinator.removeRule(rule)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                            }
+                            .buttonStyle(.plain)
+                            .help("Remove \(rule)")
+                        }
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+        }
+    }
+
     private var historySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -436,6 +484,11 @@ struct PopoverView: View {
     private func addDictionaryInput() {
         coordinator.addDictionaryTerm(dictionaryInput)
         dictionaryInput = ""
+    }
+
+    private func addRuleInput() {
+        coordinator.addRule(ruleInput)
+        ruleInput = ""
     }
 
     private func updateRecordingIndicatorAnimation() {
