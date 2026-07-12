@@ -15,10 +15,11 @@ struct WisperCloneMain {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let coordinator = DictationCoordinator()
     private var statusItem: NSStatusItem?
     private let popover = NSPopover()
+    private var popoverEventMonitor: Any?
     private var phaseObserver: AnyCancellable?
     private var recordingAnimationTimer: Timer?
     private var recordingAnimationFrame = 0
@@ -77,10 +78,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func configurePopover() {
         popover.behavior = .transient
+        popover.delegate = self
         popover.contentSize = NSSize(width: 420, height: 780)
         popover.contentViewController = NSHostingController(
             rootView: PopoverView(coordinator: coordinator)
         )
+    }
+
+    // `.transient` behavior is supposed to auto-close on outside clicks, but that
+    // relies on the app becoming key/active — which never reliably happens for an
+    // `.accessory` (no Dock icon) app. A manual mouse-down monitor closes it instead.
+    private func startPopoverEventMonitor() {
+        stopPopoverEventMonitor()
+        popoverEventMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            self?.popover.performClose(nil)
+        }
+    }
+
+    private func stopPopoverEventMonitor() {
+        if let popoverEventMonitor {
+            NSEvent.removeMonitor(popoverEventMonitor)
+        }
+        popoverEventMonitor = nil
+    }
+
+    func popoverWillClose(_ notification: Notification) {
+        stopPopoverEventMonitor()
     }
 
     private func configureMainMenu() {
@@ -225,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
+            startPopoverEventMonitor()
         }
     }
 }
