@@ -17,6 +17,8 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     private let commandHotkeyKey = "preferences.commandHotkey"
     private let showFlowBarKey = "preferences.showFlowBar"
     private let transcriptionQualityKey = "preferences.transcriptionQuality"
+    private let signatureKey = "preferences.signature"
+    private let signatureBindingKey = "preferences.signatureBinding"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -63,6 +65,15 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
             preferences.transcriptionQuality = transcriptionQuality
         }
 
+        if let data = defaults.data(forKey: signatureKey),
+           let signature = try? JSONDecoder().decode(SignatureSettings.self, from: data) {
+            preferences.signature = signature
+        }
+
+        if let data = defaults.data(forKey: signatureBindingKey) {
+            preferences.signatureHotkey = try? JSONDecoder().decode(HotkeyBinding.self, from: data)
+        }
+
         return preferences
     }
 
@@ -86,6 +97,17 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
             defaults.set(data, forKey: commandBindingKey)
         } else {
             defaults.removeObject(forKey: commandBindingKey)
+        }
+
+        if let data = try? JSONEncoder().encode(preferences.signature) {
+            defaults.set(data, forKey: signatureKey)
+        }
+
+        if let signatureHotkey = preferences.signatureHotkey,
+           let data = try? JSONEncoder().encode(signatureHotkey) {
+            defaults.set(data, forKey: signatureBindingKey)
+        } else {
+            defaults.removeObject(forKey: signatureBindingKey)
         }
     }
 }

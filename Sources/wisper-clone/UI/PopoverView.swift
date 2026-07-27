@@ -15,6 +15,7 @@ struct PopoverView: View {
                 setupSection
                 controlsSection
                 audioSection
+                signatureSection
                 dictionarySection
                 rulesSection
                 lastTranscriptSection
@@ -287,6 +288,121 @@ struct PopoverView: View {
             Text("Off pastes the raw transcript. Higher levels rewrite more.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var signatureSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Signature")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+
+            Toggle(
+                "Append automatically in the apps below",
+                isOn: Binding(
+                    get: { coordinator.preferences.signature.isAutoAppendEnabled },
+                    set: { coordinator.setSignatureAutoAppendEnabled($0) }
+                )
+            )
+
+            TextField(
+                "Made with WisprFlow",
+                text: Binding(
+                    get: { coordinator.preferences.signature.text },
+                    set: { coordinator.setSignatureText($0) }
+                )
+            )
+            .textFieldStyle(.roundedBorder)
+
+            Picker(
+                "Placement",
+                selection: Binding(
+                    get: { coordinator.preferences.signature.separator },
+                    set: { coordinator.setSignatureSeparator($0) }
+                )
+            ) {
+                ForEach(SignatureSeparator.allCases) { separator in
+                    Text(separator.displayName)
+                        .tag(separator)
+                }
+            }
+
+            HStack {
+                Text("Toggle hotkey")
+                Spacer()
+                hotkeyRecorderField(
+                    display: coordinator.preferences.signatureHotkey?.displayName ?? "Off",
+                    target: .signature
+                )
+                if coordinator.preferences.signatureHotkey != nil {
+                    Button {
+                        coordinator.setSignatureHotkey(nil)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Turn off signature hotkey")
+                }
+            }
+
+            Text("The hotkey flips the decision for the next dictation only — on where it would be off, off where it would be on.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let signatureOverride = coordinator.signatureOverride {
+                HStack {
+                    Label(
+                        signatureOverride ? "Next dictation: signature on" : "Next dictation: signature off",
+                        systemImage: signatureOverride ? "signature" : "nosign"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    Spacer()
+                    Button("Reset") {
+                        coordinator.toggleSignatureOverride()
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            ForEach(coordinator.preferences.signature.apps) { app in
+                HStack(spacing: 6) {
+                    Text(app.name)
+                        .font(.caption)
+                    Text(app.bundleID)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button {
+                        coordinator.removeSignatureApp(app.bundleID)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove \(app.name)")
+                }
+            }
+
+            if coordinator.preferences.signature.apps.isEmpty {
+                Text("No apps selected — the signature is only added via the hotkey.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Menu {
+                ForEach(coordinator.availableSignatureApps()) { app in
+                    Button(app.name) {
+                        coordinator.addSignatureApp(app)
+                    }
+                }
+            } label: {
+                Label("Add app", systemImage: "plus.circle")
+                    .font(.caption)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
         }
     }
 

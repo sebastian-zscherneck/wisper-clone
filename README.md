@@ -9,6 +9,7 @@ A macOS menu bar dictation app inspired by Wispr Flow. Hold a global hotkey, spe
 - **Command Mode**: select text anywhere, hold the command hotkey, and speak an instruction ("make this more formal", "mach das kürzer") — the AI edits the selection in place.
 - **AI cleanup levels**: from raw transcript to lightly polished text, with per-app tone (chat, email, docs) and one-shot undo of AI edits.
 - **Bilingual dictation**: the default prompt is tuned for mixed German/English speech and preserves the spoken language instead of translating. Adjust it in `TranscriptionPromptBuilder.swift` for your own language mix.
+- **Per-app signature**: automatically append a line like "Made with WisprFlow" to dictations in the apps you pick (Slack and WhatsApp are pre-filled), with a hotkey that flips the decision for the next dictation only — on where it would be off, off where it would be on.
 - **Personal dictionary & rules**: teach the transcriber your names and technical terms, and set persistent rules ("never use exclamation marks") that apply to every cleanup and command.
 - **Floating Flow Bar** with live waveform, transcript history, and microphone selection that doesn't touch your system default input (and avoids switching AirPods out of their high-quality playback profile).
 - **Guarded against accidents**: silent or accidental sub-second recordings are discarded instead of hallucinated into text.

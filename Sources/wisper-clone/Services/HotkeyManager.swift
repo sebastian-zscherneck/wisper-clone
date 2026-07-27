@@ -21,15 +21,18 @@ final class HotkeyManager {
     var onEventTapStatusChanged: ((Bool) -> Void)?
     var onCommandPress: (() -> Void)?
     var onCommandRelease: (() -> Void)?
+    var onSignaturePress: (() -> Void)?
 
     private var hotkeys: [HotkeyBinding]
     private var commandHotkey: HotkeyBinding?
+    private var signatureHotkey: HotkeyBinding?
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var globalMonitors: [Any] = []
     private var localMonitors: [Any] = []
     private var activeTriggers: Set<HotkeyBinding> = []
     private var commandIsPressed = false
+    private var signatureIsPressed = false
     private var isEventTapActive = false
     private var captureHandler: ((HotkeyCaptureEvent) -> Void)?
     private var captureHeldModifiers: HotkeyModifiers = []
@@ -50,6 +53,11 @@ final class HotkeyManager {
     func update(commandHotkey: HotkeyBinding?) {
         self.commandHotkey = commandHotkey
         commandIsPressed = false
+    }
+
+    func update(signatureHotkey: HotkeyBinding?) {
+        self.signatureHotkey = signatureHotkey
+        signatureIsPressed = false
     }
 
     /// Routes the next key/mouse gesture into `handler` instead of triggering
@@ -94,6 +102,7 @@ final class HotkeyManager {
         localMonitors = []
         activeTriggers = []
         commandIsPressed = false
+        signatureIsPressed = false
         isEventTapActive = false
         onEventTapStatusChanged?(false)
     }
@@ -270,12 +279,15 @@ final class HotkeyManager {
     }
 
     private var allBindings: [HotkeyBinding] {
-        // Command first: when a gesture matches both roles, command wins.
-        (commandHotkey.map { [$0] } ?? []) + hotkeys
+        // Command and signature first: when a gesture matches several roles, the
+        // single-purpose ones win over plain dictation.
+        (commandHotkey.map { [$0] } ?? []) + (signatureHotkey.map { [$0] } ?? []) + hotkeys
     }
 
     private func isPressed(_ binding: HotkeyBinding) -> Bool {
-        binding == commandHotkey ? commandIsPressed : activeTriggers.contains(binding)
+        if binding == commandHotkey { return commandIsPressed }
+        if binding == signatureHotkey { return signatureIsPressed }
+        return activeTriggers.contains(binding)
     }
 
     /// Presses the bindings for `trigger` whose modifiers are all held. When several
@@ -355,10 +367,15 @@ final class HotkeyManager {
     }
 
     private func update(trigger: HotkeyBinding, pressed: Bool) {
-        guard trigger == commandHotkey || hotkeys.contains(trigger) else { return }
+        guard trigger == commandHotkey || trigger == signatureHotkey || hotkeys.contains(trigger) else { return }
 
         if trigger == commandHotkey {
             updateCommandTrigger(pressed: pressed)
+            return
+        }
+
+        if trigger == signatureHotkey {
+            updateSignatureTrigger(pressed: pressed)
             return
         }
 
@@ -390,6 +407,16 @@ final class HotkeyManager {
             onCommandPress?()
         } else {
             onCommandRelease?()
+        }
+    }
+
+    // The signature hotkey is a one-shot toggle, so only the press edge matters — but the
+    // pressed-state is still tracked so a held key can't retrigger it.
+    private func updateSignatureTrigger(pressed: Bool) {
+        guard signatureIsPressed != pressed else { return }
+        signatureIsPressed = pressed
+        if pressed {
+            onSignaturePress?()
         }
     }
 }

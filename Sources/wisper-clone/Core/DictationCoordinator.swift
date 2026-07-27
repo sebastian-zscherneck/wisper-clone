@@ -19,10 +19,14 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var isCommandRecording = false
     @Published private(set) var audioLevels: [Float] = []
     @Published private(set) var hotkeyCaptureTarget: HotkeyCaptureTarget?
+    /// Overrides the per-app signature rule for the next dictation only.
+    /// `nil` follows the configured apps; `true`/`false` force it on/off once.
+    @Published private(set) var signatureOverride: Bool?
     @Published var preferences = AppPreferences() {
         didSet {
             hotkeyManager.update(hotkeys: preferences.hotkeys)
             hotkeyManager.update(commandHotkey: preferences.commandHotkey)
+            hotkeyManager.update(signatureHotkey: preferences.signatureHotkey)
             audioRecorder.selectedInputDeviceID = preferences.selectedInputDeviceID
             preferencesStore.savePreferences(preferences)
         }
@@ -123,6 +127,7 @@ final class DictationCoordinator: ObservableObject {
         self.audioRecorder.selectedInputDeviceID = preferences.selectedInputDeviceID
         hotkeyManager.update(hotkeys: preferences.hotkeys)
         hotkeyManager.update(commandHotkey: preferences.commandHotkey)
+        hotkeyManager.update(signatureHotkey: preferences.signatureHotkey)
         inputDevices = self.audioRecorder.availableInputDevices()
         configureHotkey()
         notifier.requestPermission()
@@ -397,12 +402,104 @@ final class DictationCoordinator: ObservableObject {
         preferences = updated
     }
 
+    func setSignatureHotkey(_ hotkey: HotkeyBinding?) {
+        var updated = preferences
+        // Same rule as the command hotkey: never take dictation's last binding away.
+        if let hotkey, updated.hotkeys.count <= 1, updated.hotkeys.contains(hotkey) {
+            return
+        }
+        updated.signatureHotkey = hotkey
+        if let hotkey {
+            if updated.hotkeys.count > 1 {
+                updated.hotkeys.removeAll { $0 == hotkey }
+            }
+            if updated.commandHotkey == hotkey {
+                updated.commandHotkey = nil
+            }
+        }
+        preferences = updated
+    }
+
+    // MARK: - Signature
+
+    func setSignatureAutoAppendEnabled(_ enabled: Bool) {
+        preferences.signature.isAutoAppendEnabled = enabled
+    }
+
+    func setSignatureText(_ text: String) {
+        preferences.signature.text = text
+    }
+
+    func setSignatureSeparator(_ separator: SignatureSeparator) {
+        preferences.signature.separator = separator
+    }
+
+    func addSignatureApp(_ app: SignatureApp) {
+        let identity = app.bundleID.lowercased()
+        guard !identity.isEmpty else { return }
+        guard !preferences.signature.apps.contains(where: { $0.bundleID.lowercased() == identity }) else { return }
+        var updated = preferences
+        updated.signature.apps.append(app)
+        preferences = updated
+    }
+
+    func removeSignatureApp(_ bundleID: String) {
+        let identity = bundleID.lowercased()
+        var updated = preferences
+        updated.signature.apps.removeAll { $0.bundleID.lowercased() == identity }
+        preferences = updated
+    }
+
+    /// Apps offered in the "Add app" menu: everything with a Dock icon right now, plus the
+    /// built-in suggestions so an app can be configured while it is closed. Already
+    /// configured apps are filtered out.
+    func availableSignatureApps() -> [SignatureApp] {
+        let configured = Set(preferences.signature.apps.map { $0.bundleID.lowercased() })
+        let ownProcessIdentifier = NSRunningApplication.current.processIdentifier
+        let running = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.processIdentifier != ownProcessIdentifier }
+            .compactMap { application -> SignatureApp? in
+                guard let bundleID = application.bundleIdentifier, let name = application.localizedName else {
+                    return nil
+                }
+                return SignatureApp(bundleID: bundleID, name: name)
+            }
+
+        var seen = Set<String>()
+        return (running + SignatureApp.suggestions)
+            .filter { app in
+                let identity = app.bundleID.lowercased()
+                return !configured.contains(identity) && seen.insert(identity).inserted
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Flips the signature decision for the next dictation and back. Reads the app that is
+    /// frontmost *now*, so pressing the hotkey in Slack (where the signature is already on)
+    /// turns it off once, and pressing it anywhere else turns it on once.
+    func toggleSignatureOverride() {
+        guard signatureOverride == nil else {
+            signatureOverride = nil
+            statusText = "Signature: following app rules"
+            return
+        }
+
+        let target = frontmostApplicationTracker.captureTargetApplication()
+        let wouldAppend = SignatureAppender.shouldAppend(
+            settings: preferences.signature,
+            bundleID: target?.bundleIdentifier
+        )
+        signatureOverride = !wouldAppend
+        statusText = wouldAppend ? "Signature off for next dictation" : "Signature on for next dictation"
+    }
+
     // MARK: - Hotkey capture ("click the field, press your shortcut")
 
     enum HotkeyCaptureTarget: Equatable {
         /// Replace the dictation binding at `index`; `nil` appends a new one.
         case dictation(index: Int?)
         case command
+        case signature
     }
 
     func beginHotkeyCapture(for target: HotkeyCaptureTarget) {
@@ -448,9 +545,13 @@ final class DictationCoordinator: ObservableObject {
             replacedSlot = index.flatMap { updated.hotkeys.indices.contains($0) ? updated.hotkeys[$0] : nil }
         case .command:
             replacedSlot = updated.commandHotkey
+        case .signature:
+            replacedSlot = updated.signatureHotkey
         }
 
-        let takenElsewhere = (updated.hotkeys.contains(binding) || updated.commandHotkey == binding)
+        let takenElsewhere = (updated.hotkeys.contains(binding)
+            || updated.commandHotkey == binding
+            || updated.signatureHotkey == binding)
             && binding != replacedSlot
         if takenElsewhere {
             statusText = "\(binding.displayName) is already in use"
@@ -466,6 +567,8 @@ final class DictationCoordinator: ObservableObject {
             }
         case .command:
             updated.commandHotkey = binding
+        case .signature:
+            updated.signatureHotkey = binding
         }
 
         preferences = updated
@@ -540,6 +643,9 @@ final class DictationCoordinator: ObservableObject {
             guard let self else { return }
             guard recordingMode == .command else { return }
             finishRecording()
+        }
+        hotkeyManager.onSignaturePress = { [weak self] in
+            self?.toggleSignatureOverride()
         }
     }
 
@@ -626,6 +732,22 @@ final class DictationCoordinator: ObservableObject {
                     notifier.notify(title: "Wisper Clone", body: "AI cleanup failed — pasted raw transcript.")
                 }
                 cleanupDuration = clock.now - cleanupStart
+            }
+
+            // Appended after cleanup so the AI never rewrites, translates or "polishes"
+            // the signature away. A one-shot override from the signature hotkey wins over
+            // the per-app rule and is consumed here, whether or not it changed anything.
+            let shouldAppendSignature = signatureOverride ?? SignatureAppender.shouldAppend(
+                settings: preferences.signature,
+                bundleID: pasteTargetApplication?.bundleIdentifier
+            )
+            signatureOverride = nil
+            if shouldAppendSignature {
+                final = SignatureAppender.append(
+                    preferences.signature.trimmedText,
+                    to: final,
+                    separator: preferences.signature.separator
+                )
             }
 
             lastTranscript = final

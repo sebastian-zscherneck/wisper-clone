@@ -106,6 +106,67 @@ import Testing
     #expect(store.loadPreferences().commandHotkey == nil)
 }
 
+@Test func preferencesStore_defaultsSignatureToDisabledWithPresetApps() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    let signature = store.loadPreferences().signature
+    #expect(signature.isAutoAppendEnabled == false)
+    #expect(signature.apps == SignatureApp.defaults)
+    #expect(store.loadPreferences().signatureHotkey == nil)
+}
+
+@Test func preferencesStore_roundTripsSignatureSettings() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    var preferences = AppPreferences()
+    preferences.signature.isAutoAppendEnabled = true
+    preferences.signature.text = "— dictated with WisprFlow"
+    preferences.signature.separator = .blankLine
+    preferences.signature.apps = [SignatureApp(bundleID: "notion.id", name: "Notion")]
+    preferences.signatureHotkey = .shiftMouse5
+    store.savePreferences(preferences)
+
+    let loaded = store.loadPreferences()
+    #expect(loaded.signature == preferences.signature)
+    #expect(loaded.signatureHotkey == .shiftMouse5)
+}
+
+@Test func preferencesStore_clearsSignatureHotkeyBackToNil() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    var preferences = AppPreferences()
+    preferences.signatureHotkey = .fnControl
+    store.savePreferences(preferences)
+
+    preferences.signatureHotkey = nil
+    store.savePreferences(preferences)
+
+    #expect(store.loadPreferences().signatureHotkey == nil)
+}
+
+@Test func preferencesStore_keepsSignatureDefaultsWhenStoredBlobIsPartial() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set(Data(#"{"isAutoAppendEnabled":true}"#.utf8), forKey: "preferences.signature")
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    let signature = store.loadPreferences().signature
+    #expect(signature.isAutoAppendEnabled == true)
+    #expect(signature.text == "Made with WisprFlow")
+    #expect(signature.separator == .newline)
+    #expect(signature.apps == SignatureApp.defaults)
+}
+
 @Test func preferencesStore_migratesLegacyHotkeyStringsToBindings() throws {
     let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suiteName))
