@@ -19,6 +19,11 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     private let transcriptionQualityKey = "preferences.transcriptionQuality"
     private let signatureKey = "preferences.signature"
     private let signatureBindingKey = "preferences.signatureBinding"
+    private let engineKey = "preferences.engine"
+    private let showInDockKey = "preferences.showInDock"
+    private let showMenuBarIconKey = "preferences.showMenuBarIcon"
+    private let enableSoundsKey = "preferences.enableSounds"
+    private let enableHapticsKey = "preferences.enableHaptics"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -74,6 +79,27 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
             preferences.signatureHotkey = try? JSONDecoder().decode(HotkeyBinding.self, from: data)
         }
 
+        if let rawEngine = defaults.string(forKey: engineKey),
+           let engine = ProcessingEngine(rawValue: rawEngine) {
+            preferences.engine = engine
+        }
+
+        if defaults.object(forKey: showInDockKey) != nil {
+            preferences.showInDock = defaults.bool(forKey: showInDockKey)
+        }
+
+        if defaults.object(forKey: showMenuBarIconKey) != nil {
+            preferences.showMenuBarIcon = defaults.bool(forKey: showMenuBarIconKey)
+        }
+
+        if defaults.object(forKey: enableSoundsKey) != nil {
+            preferences.enableSounds = defaults.bool(forKey: enableSoundsKey)
+        }
+
+        if defaults.object(forKey: enableHapticsKey) != nil {
+            preferences.enableHaptics = defaults.bool(forKey: enableHapticsKey)
+        }
+
         return preferences
     }
 
@@ -85,6 +111,11 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
         defaults.set(preferences.cleanupLevel.rawValue, forKey: cleanupLevelKey)
         defaults.set(preferences.showFlowBar, forKey: showFlowBarKey)
         defaults.set(preferences.transcriptionQuality.rawValue, forKey: transcriptionQualityKey)
+        defaults.set(preferences.engine.rawValue, forKey: engineKey)
+        defaults.set(preferences.showInDock, forKey: showInDockKey)
+        defaults.set(preferences.showMenuBarIcon, forKey: showMenuBarIconKey)
+        defaults.set(preferences.enableSounds, forKey: enableSoundsKey)
+        defaults.set(preferences.enableHaptics, forKey: enableHapticsKey)
 
         if let selectedInputDeviceID = preferences.selectedInputDeviceID {
             defaults.set(selectedInputDeviceID, forKey: selectedInputDeviceIDKey)

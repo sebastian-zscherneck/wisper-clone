@@ -153,11 +153,13 @@ import Testing
     recorder.currentAudioLevel = 0.0
     let transcriber = SpyTranscriptionClient(result: "hallucinated prompt echo")
     let pasteboard = SpyPasteboard()
+    let notifier = SpyNotifier()
     let coordinator = makeCoordinator(
         recorder: recorder,
         transcriber: transcriber,
         pasteboard: pasteboard,
-        credentialStore: SpyCredentialStore(apiKey: "test-key")
+        credentialStore: SpyCredentialStore(apiKey: "test-key"),
+        notifier: notifier
     )
 
     coordinator.beginRecording()
@@ -165,10 +167,13 @@ import Testing
     try await expectAudioLevelsNonEmpty(in: coordinator)
 
     coordinator.finishRecording()
-    try await expectPhase(.failed, in: coordinator)
+    // Nothing was said: back to idle without an error or a notification.
+    try await expectPhase(.idle, in: coordinator)
 
     #expect(transcriber.requests.isEmpty)
     #expect(pasteboard.pastedTexts.isEmpty)
+    #expect(notifier.notifications.isEmpty)
+    #expect(coordinator.statusText == "Ready")
 }
 
 @MainActor

@@ -11,9 +11,14 @@ let package = Package(
     products: [
         .executable(name: "WisperClone", targets: ["wisper-clone"])
     ],
+    dependencies: [
+        // Local speech-to-text (Parakeet TDT v3 on the Neural Engine).
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.15.5")
+    ],
     targets: [
         .executableTarget(
             name: "wisper-clone",
+            dependencies: [.product(name: "FluidAudio", package: "FluidAudio")],
             resources: [
                 .process("Resources")
             ]

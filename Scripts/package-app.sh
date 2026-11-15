@@ -54,6 +54,7 @@ rm -rf "$BUILD_APP_DIR"
 mkdir -p "$BUILD_APP_DIR/Contents/MacOS" "$BUILD_APP_DIR/Contents/Resources"
 cp "$EXECUTABLE" "$BUILD_APP_DIR/Contents/MacOS/WisperClone"
 cp "$ROOT_DIR/Sources/wisper-clone/Resources/AppInfo.plist" "$BUILD_APP_DIR/Contents/Info.plist"
+cp "$ROOT_DIR/Sources/wisper-clone/Resources/AppIcon.icns" "$BUILD_APP_DIR/Contents/Resources/AppIcon.icns"
 
 codesign --force --deep --sign "$SIGNING_IDENTITY" "$BUILD_APP_DIR"
 

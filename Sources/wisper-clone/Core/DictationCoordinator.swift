@@ -11,6 +11,7 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var lastTranscript = ""
     @Published private(set) var history: [TranscriptEntry] = []
     @Published private(set) var hasAPIKey = false
+    @Published private(set) var localModelState: LocalModelState = .notLoaded
     @Published private(set) var isGlobalShortcutReady = false
     @Published private(set) var dictionaryTerms: [String] = []
     @Published private(set) var rules: [String] = []
@@ -41,6 +42,8 @@ final class DictationCoordinator: ObservableObject {
     private var audioRecorder: AudioRecording
     private let transcriptionClient: TranscriptionServicing
     private let chatClient: ChatCompleting
+    private let localTranscriptionClient: TranscriptionServicing
+    private let localChatClient: ChatCompleting
     private let credentialStore: CredentialStoring
     private let paster: TextPasting
     private let notifier: UserNotifying
@@ -52,6 +55,7 @@ final class DictationCoordinator: ObservableObject {
     private let preferencesStore: AppPreferencesStoring
     private let historyStore: TranscriptHistoryStoring
     private let selectedTextCapturer: SelectedTextCapturing
+    private let feedback: DictationFeedbackProviding
     private let warmUpConnection: @Sendable () -> Void
     private var pasteTargetApplication: NSRunningApplication?
     private var pasteTargetWindowTitle: String?
@@ -64,6 +68,9 @@ final class DictationCoordinator: ObservableObject {
     // accidental hotkey taps produce silent/near-empty audio that Whisper-family models
     // answer with hallucinated prompt content. Internal so tests can lower it.
     var minimumRecordingDuration: Duration = .seconds(1)
+    /// How long a failure stays on screen before the app returns to idle.
+    var failureDisplayDuration: Duration = .seconds(4)
+    private var failureGeneration = 0
     private var recordingLevelSampleCount = 0
     private static let maxAudioLevelSamples = 40
     // Below this normalized peak level a recording is treated as silence. Whisper-family
@@ -89,6 +96,8 @@ final class DictationCoordinator: ObservableObject {
         audioRecorder: AudioRecording = AudioRecorderService(),
         transcriptionClient: TranscriptionServicing = OpenAITranscriptionClient(),
         chatClient: ChatCompleting = OpenAIChatClient(),
+        localTranscriptionClient: TranscriptionServicing = LocalTranscriptionClient(),
+        localChatClient: ChatCompleting = AppleIntelligenceChatClient(),
         credentialStore: CredentialStoring = KeychainCredentialStore(),
         paster: TextPasting = ClipboardPaster(),
         notifier: UserNotifying = UserNotifier(),
@@ -100,11 +109,14 @@ final class DictationCoordinator: ObservableObject {
         preferencesStore: AppPreferencesStoring = UserDefaultsAppPreferencesStore(),
         historyStore: TranscriptHistoryStoring = FileTranscriptHistoryStore(),
         selectedTextCapturer: SelectedTextCapturing = SelectedTextCapturer(),
+        feedback: DictationFeedbackProviding? = nil,
         warmUpConnection: @escaping @Sendable () -> Void = { OpenAITranscriptionClient.warmUpConnection() }
     ) {
         self.audioRecorder = audioRecorder
         self.transcriptionClient = transcriptionClient
         self.chatClient = chatClient
+        self.localTranscriptionClient = localTranscriptionClient
+        self.localChatClient = localChatClient
         self.credentialStore = credentialStore
         self.paster = paster
         self.notifier = notifier
@@ -116,13 +128,14 @@ final class DictationCoordinator: ObservableObject {
         self.preferencesStore = preferencesStore
         self.historyStore = historyStore
         self.selectedTextCapturer = selectedTextCapturer
+        self.feedback = feedback ?? DictationFeedback()
         self.warmUpConnection = warmUpConnection
 
-        hasAPIKey = ((try? credentialStore.readAPIKey()) ?? nil)?.isEmpty == false
         dictionaryTerms = personalDictionaryStore.loadTerms()
         rules = personalRulesStore.loadRules()
         history = historyStore.loadEntries()
         preferences = preferencesStore.loadPreferences()
+        refreshAPIKeyState()
         preferences.launchAtLogin = launchAtLoginManager.isEnabled
         self.audioRecorder.selectedInputDeviceID = preferences.selectedInputDeviceID
         hotkeyManager.update(hotkeys: preferences.hotkeys)
@@ -164,6 +177,7 @@ final class DictationCoordinator: ObservableObject {
 
     func start() {
         hotkeyManager.start()
+        prepareLocalModelsIfNeeded()
     }
 
     func stop() {
@@ -201,7 +215,7 @@ final class DictationCoordinator: ObservableObject {
 
     private func startRecording(mode: RecordingMode, recordingStatusText: String) {
         guard phase != .recording && phase != .transcribing && phase != .pasting else { return }
-        guard hasAPIKey else {
+        guard preferences.engine == .local || hasAPIKey else {
             fail(DictationError.missingAPIKey)
             return
         }
@@ -210,7 +224,14 @@ final class DictationCoordinator: ObservableObject {
         let targetApplication = frontmostApplicationTracker.captureTargetApplication()
         pasteTargetApplication = targetApplication
         pasteTargetWindowTitle = nil
-        warmUpConnection()
+        if preferences.engine == .openAI {
+            warmUpConnection()
+        } else if mode == .dictation, preferences.cleanupLevel != .none,
+                  let prewarming = localChatClient as? ChatPrewarming {
+            // Load the cleanup prompt into the on-device model while the user is still
+            // speaking, so the cleanup itself starts without a cold start.
+            prewarming.prewarm(systemPrompt: localCleanupSystemPrompt())
+        }
 
         // The window title is only needed at cleanup time (for tone detection), not to
         // start recording, so resolve it off the synchronous hot path. If it hasn't
@@ -236,6 +257,7 @@ final class DictationCoordinator: ObservableObject {
             do {
                 _ = try audioRecorder.startRecording()
                 phase = .recording
+                signal(.started)
                 recordingStartedAt = .now
                 statusText = recordingStatusText
                 onRecordingStarted?()
@@ -258,6 +280,7 @@ final class DictationCoordinator: ObservableObject {
 
         phase = .transcribing
         statusText = "Transcribing..."
+        signal(.finished)
 
         let mode = recordingMode
         let clock = ContinuousClock()
@@ -279,6 +302,9 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func cancelRecording() {
+        if phase == .recording {
+            signal(.cancelled)
+        }
         audioRecorder.cancelRecording()
         stopAudioLevelTimer()
         phase = .idle
@@ -583,6 +609,11 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
+    func copy(_ entry: TranscriptEntry) {
+        paster.copy(entry.text)
+        statusText = "Copied"
+    }
+
     func copyRaw(_ entry: TranscriptEntry) {
         paster.copy(entry.rawText)
         statusText = "Copied"
@@ -604,7 +635,7 @@ final class DictationCoordinator: ObservableObject {
         hotkeyManager.onEventTapStatusChanged = { [weak self] ready in
             self?.isGlobalShortcutReady = ready
             if !ready {
-                self?.statusText = "Allow Input Monitoring for closed-popover shortcuts."
+                self?.statusText = "Allow Input Monitoring for global shortcuts."
             }
         }
         hotkeyManager.onPress = { [weak self] in
@@ -660,22 +691,25 @@ final class DictationCoordinator: ObservableObject {
                 logger.debug("recording skipped: no audio above silence threshold")
                 throw DictationError.emptyTranscript
             }
-            guard let apiKey = try credentialStore.readAPIKey(), !apiKey.isEmpty else {
-                throw DictationError.missingAPIKey
-            }
+            let engine = try resolveEngine()
 
             let transcribeStart = clock.now
             let prompt = transcriptionPrompt()
-            let rawText = try await transcriptionClient.transcribe(
+            let rawText = try await engine.transcriber.transcribe(
                 fileURL: fileURL,
-                apiKey: apiKey,
+                apiKey: engine.apiKey,
                 model: preferences.transcriptionQuality.modelName,
                 prompt: prompt,
                 language: preferences.languageMode.apiLanguageCode
             )
             let transcribeDuration = clock.now - transcribeStart
 
-            let cleaned = TextCleaner.clean(rawText)
+            let isLocal = preferences.engine == .local
+            if isLocal, TranscriptChecks.isMostlyNonLatin(rawText) {
+                logger.debug("transcript discarded: wrong script from local speech model")
+                throw DictationError.unrecognizedLanguage
+            }
+            let cleaned = DictionaryCorrector.apply(TextCleaner.clean(rawText), terms: dictionaryTerms)
             guard !cleaned.isEmpty else {
                 throw DictationError.emptyTranscript
             }
@@ -708,24 +742,34 @@ final class DictationCoordinator: ObservableObject {
                 let windowTitle = self.pasteTargetWindowTitle ?? "nil"
                 logger.debug("cleanup tone: \(tone.name, privacy: .public) for \(bundleID, privacy: .public) (window: \(windowTitle, privacy: .public))")
                 let promptBuilder = CleanupPromptBuilder()
-                let systemPrompt = promptBuilder.buildSystemPrompt(
-                    level: preferences.cleanupLevel,
-                    tone: tone,
-                    vocabulary: dictionaryTerms,
-                    rules: rules
-                )
+                let systemPrompt = isLocal
+                    ? localCleanupSystemPrompt()
+                    : promptBuilder.buildSystemPrompt(
+                        level: preferences.cleanupLevel,
+                        tone: tone,
+                        vocabulary: dictionaryTerms,
+                        rules: rules
+                    )
                 let cleanupStart = clock.now
                 do {
                     let polished = TextCleaner.clean(
-                        try await chatClient.complete(
+                        try await engine.chat.complete(
                             systemPrompt: systemPrompt,
-                            userMessage: promptBuilder.buildCleanupUserMessage(transcript: raw),
+                            userMessage: isLocal
+                                ? promptBuilder.buildLocalCleanupUserMessage(transcript: raw)
+                                : promptBuilder.buildCleanupUserMessage(transcript: raw),
                             model: OpenAIChatClient.cleanupModel,
-                            apiKey: apiKey
+                            apiKey: engine.apiKey
                         )
                     )
-                    if !polished.isEmpty {
-                        final = polished
+                    if polished.isEmpty {
+                        // Keep the raw transcript.
+                    } else if isLocal, !TranscriptChecks.cleanupKeptTheWords(raw: raw, cleaned: polished, level: preferences.cleanupLevel) {
+                        // The small on-device model sometimes rewords or shortens the text
+                        // although the level only allows tidying. The spoken words win.
+                        logger.debug("cleanup discarded: output strayed from the spoken words")
+                    } else {
+                        final = DictionaryCorrector.apply(polished, terms: dictionaryTerms)
                     }
                 } catch {
                     logger.error("AI cleanup failed: \(error.localizedDescription, privacy: .public)")
@@ -776,9 +820,7 @@ final class DictationCoordinator: ObservableObject {
                 logger.debug("recording skipped: no audio above silence threshold")
                 throw DictationError.emptyTranscript
             }
-            guard let apiKey = try credentialStore.readAPIKey(), !apiKey.isEmpty else {
-                throw DictationError.missingAPIKey
-            }
+            let engine = try resolveEngine()
 
             // Activate the target app before capturing the selection, then capture it
             // after the hotkey release — synthesizing ⌘C while the hotkey modifiers are
@@ -791,9 +833,9 @@ final class DictationCoordinator: ObservableObject {
             }
 
             let transcribeStart = clock.now
-            let rawInstruction = try await transcriptionClient.transcribe(
+            let rawInstruction = try await engine.transcriber.transcribe(
                 fileURL: fileURL,
-                apiKey: apiKey,
+                apiKey: engine.apiKey,
                 model: preferences.transcriptionQuality.modelName,
                 prompt: TranscriptionPromptBuilder().buildCommandInstructionPrompt(),
                 language: preferences.languageMode.apiLanguageCode
@@ -828,11 +870,11 @@ final class DictationCoordinator: ObservableObject {
             )
 
             let chatStart = clock.now
-            let rawResult = try await chatClient.complete(
+            let rawResult = try await engine.chat.complete(
                 systemPrompt: systemPrompt,
                 userMessage: userMessage,
                 model: OpenAIChatClient.commandModel,
-                apiKey: apiKey
+                apiKey: engine.apiKey
             )
             let chatDuration = clock.now - chatStart
 
@@ -853,6 +895,59 @@ final class DictationCoordinator: ObservableObject {
             logTiming(prefix: "command", stop: stopDuration, transcribe: transcribeDuration, middle: ("chat", chatDuration), paste: pasteDuration)
         } catch {
             fail(error)
+        }
+    }
+
+    private struct ResolvedEngine {
+        let transcriber: TranscriptionServicing
+        let chat: ChatCompleting
+        let apiKey: String
+    }
+
+    /// The Keychain is only read while the OpenAI engine is selected. A local-only setup
+    /// never triggers a Keychain prompt, which would otherwise block the launch.
+    private func refreshAPIKeyState() {
+        guard preferences.engine == .openAI else { return }
+        hasAPIKey = ((try? credentialStore.readAPIKey()) ?? nil)?.isEmpty == false
+    }
+
+    /// Picks the clients for the selected engine. The local engine needs no key.
+    private func resolveEngine() throws -> ResolvedEngine {
+        switch preferences.engine {
+        case .local:
+            return ResolvedEngine(transcriber: localTranscriptionClient, chat: localChatClient, apiKey: "")
+        case .openAI:
+            guard let apiKey = try credentialStore.readAPIKey(), !apiKey.isEmpty else {
+                throw DictationError.missingAPIKey
+            }
+            return ResolvedEngine(transcriber: transcriptionClient, chat: chatClient, apiKey: apiKey)
+        }
+    }
+
+    func setEngine(_ engine: ProcessingEngine) {
+        preferences.engine = engine
+        refreshAPIKeyState()
+        prepareLocalModelsIfNeeded()
+    }
+
+    /// Loads the local speech model in the background so the first dictation does not
+    /// wait for it. Safe to call repeatedly.
+    func prepareLocalModelsIfNeeded() {
+        guard preferences.engine == .local,
+              let preparing = localTranscriptionClient as? LocalModelPreparing,
+              localModelState != .loading, localModelState != .ready else { return }
+        localModelState = .loading
+        Task {
+            do {
+                try await preparing.prepare()
+                localModelState = .ready
+            } catch {
+                localModelState = .failed(error.localizedDescription)
+                logger.error("local model load failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        Task.detached(priority: .utility) {
+            AppleIntelligenceChatClient.prewarm()
         }
     }
 
@@ -878,11 +973,47 @@ final class DictationCoordinator: ObservableObject {
     private func fail(_ error: Error) {
         logger.error("dictation failed: \(error.localizedDescription, privacy: .public)")
         stopAudioLevelTimer()
-        phase = .failed
-        statusText = error.localizedDescription
         isHandsFreeActive = false
         isCommandRecording = false
+
+        // Nothing usable was said: that is not worth an error. Go back to idle quietly.
+        if let dictationError = error as? DictationError, dictationError == .emptyTranscript {
+            phase = .idle
+            statusText = "Ready"
+            return
+        }
+
+        phase = .failed
+        statusText = error.localizedDescription
+        signal(.failed)
         notifier.notify(title: "Wisper Clone", body: error.localizedDescription)
+        scheduleFailureReset()
+    }
+
+    /// A failure stays visible for a moment and then clears itself, so the Flow Bar does
+    /// not keep showing an old error.
+    private func scheduleFailureReset() {
+        failureGeneration += 1
+        let generation = failureGeneration
+        let delay = failureDisplayDuration
+        Task {
+            try? await Task.sleep(for: delay)
+            guard generation == failureGeneration, phase == .failed else { return }
+            phase = .idle
+            statusText = "Ready"
+        }
+    }
+
+    private func signal(_ event: FeedbackEvent) {
+        feedback.signal(event, sound: preferences.enableSounds, haptic: preferences.enableHaptics)
+    }
+
+    private func localCleanupSystemPrompt() -> String {
+        CleanupPromptBuilder().buildLocalSystemPrompt(
+            level: preferences.cleanupLevel,
+            vocabulary: dictionaryTerms,
+            rules: rules
+        )
     }
 
     // Silently drops the current recording: no API call, no paste, no error surface.

@@ -35,6 +35,41 @@ struct AppPreferences: Equatable, Sendable {
     var transcriptionQuality: TranscriptionQuality = .accurate
     var signature = SignatureSettings()
     var signatureHotkey: HotkeyBinding? = nil
+    var engine: ProcessingEngine = .local
+    var showInDock: Bool = true
+    var showMenuBarIcon: Bool = false
+    var enableSounds: Bool = false
+    var enableHaptics: Bool = false
+
+    /// The app must stay reachable: without a Dock icon the menu bar icon is always shown.
+    var isMenuBarIconVisible: Bool { showMenuBarIcon || !showInDock }
+}
+
+/// Where speech-to-text and AI text processing run.
+enum ProcessingEngine: String, CaseIterable, Identifiable, Sendable {
+    /// Parakeet for speech and Apple's on-device language model for text. Nothing leaves the Mac.
+    case local
+    /// OpenAI API with the user's own key.
+    case openAI
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .local:
+            return "On this Mac"
+        case .openAI:
+            return "OpenAI API"
+        }
+    }
+}
+
+/// Load state of the local speech model, shown in the settings.
+enum LocalModelState: Equatable, Sendable {
+    case notLoaded
+    case loading
+    case ready
+    case failed(String)
 }
 
 /// One app the signature applies to. The name is stored alongside the bundle ID so the
@@ -215,6 +250,7 @@ enum DictationError: LocalizedError, Equatable {
     case accessibilityDenied
     case recordingUnavailable
     case emptyTranscript
+    case unrecognizedLanguage
     case pasteFailed
     case transcriptionFailed(String)
     case chatCompletionFailed(String)
@@ -231,6 +267,8 @@ enum DictationError: LocalizedError, Equatable {
             return "Accessibility permission is required to paste into other apps."
         case .recordingUnavailable:
             return "Could not start audio recording."
+        case .unrecognizedLanguage:
+            return "Not recognized as German or English. Please try again."
         case .emptyTranscript:
             return "The transcription was empty."
         case .pasteFailed:

@@ -211,3 +211,46 @@ import Testing
 
     #expect(store.loadPreferences().hotkeys == [HotkeyBinding.mouse5])
 }
+
+@Test func preferencesStore_defaultsToLocalEngineShownInDock() throws {
+    let suiteName = "wisper-clone-tests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    #expect(store.loadPreferences().engine == .local)
+    #expect(store.loadPreferences().showInDock == true)
+}
+
+@Test func preferencesStore_roundTripsEngineAndDockVisibility() throws {
+    let suiteName = "wisper-clone-tests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    var preferences = AppPreferences()
+    preferences.engine = .openAI
+    preferences.showInDock = false
+    store.savePreferences(preferences)
+
+    #expect(store.loadPreferences().engine == .openAI)
+    #expect(store.loadPreferences().showInDock == false)
+}
+
+@Test func preferencesStore_defaultsToNoSoundNoHapticsAndRoundTripsBoth() throws {
+    let suiteName = "wisper-clone-tests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    #expect(store.loadPreferences().enableSounds == false)
+    #expect(store.loadPreferences().enableHaptics == false)
+
+    var preferences = AppPreferences()
+    preferences.enableSounds = true
+    preferences.enableHaptics = true
+    store.savePreferences(preferences)
+
+    #expect(store.loadPreferences().enableSounds == true)
+    #expect(store.loadPreferences().enableHaptics == true)
+}

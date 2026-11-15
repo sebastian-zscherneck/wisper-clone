@@ -15,14 +15,13 @@ struct WisperCloneMain {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let coordinator = DictationCoordinator()
     private var statusItem: NSStatusItem?
-    private let popover = NSPopover()
-    private var popoverEventMonitor: Any?
+    private lazy var hubWindowController = HubWindowController(coordinator: coordinator)
+    private var dockPreferenceObserver: AnyCancellable?
     private var phaseObserver: AnyCancellable?
-    private var recordingAnimationTimer: Timer?
-    private var recordingAnimationFrame = 0
+    private var menuBarIconObserver: AnyCancellable?
     private lazy var flowBarController = FlowBarController(coordinator: coordinator)
     private var flowBarPreferencesObserver: AnyCancellable?
 
@@ -31,17 +30,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         configureMainMenu()
         configureStatusItem()
-        configurePopover()
         observeDictationPhase()
         observeFlowBarPreference()
-        coordinator.onRecordingStarted = { [weak self] in
-            self?.popover.performClose(nil)
-        }
+        observeDockPreference()
+        observeMenuBarIconPreference()
         coordinator.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        stopRecordingStatusAnimation()
         coordinator.stop()
         coordinator.cancelRecording()
     }
@@ -70,42 +66,157 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func configureStatusItem() {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.target = self
-        statusItem.button?.action = #selector(togglePopover(_:))
+        let menu = NSMenu()
+        menu.delegate = self
+        statusItem.menu = menu
         self.statusItem = statusItem
         updateStatusItem(for: coordinator.phase)
     }
 
-    private func configurePopover() {
-        popover.behavior = .transient
-        popover.delegate = self
-        popover.contentSize = NSSize(width: 420, height: 780)
-        popover.contentViewController = NSHostingController(
-            rootView: PopoverView(coordinator: coordinator)
+    // MARK: - Dock
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showHub(nil)
+        return false
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    private func observeDockPreference() {
+        dockPreferenceObserver = coordinator.$preferences
+            .map(\.showInDock)
+            .removeDuplicates()
+            .sink { [weak self] showInDock in
+                self?.applyDockVisibility(showInDock)
+            }
+    }
+
+    private func applyDockVisibility(_ showInDock: Bool) {
+        let hubWasVisible = hubWindowController.window?.isVisible == true
+        NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
+        // Switching to an accessory app sends its windows behind the others.
+        if hubWasVisible {
+            hubWindowController.show()
+        }
+    }
+
+    @objc private func showHub(_ sender: Any?) {
+        hubWindowController.show(section: .home)
+    }
+
+    @objc private func showSettings(_ sender: Any?) {
+        hubWindowController.show(settings: true)
+    }
+
+    // MARK: - Status menu
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === statusItem?.menu else { return }
+        coordinator.refreshInputDevices()
+        menu.removeAllItems()
+
+        let status = NSMenuItem(title: coordinator.statusText, action: nil, keyEquivalent: "")
+        status.isEnabled = false
+        menu.addItem(status)
+        menu.addItem(.separator())
+
+        if coordinator.phase == .recording {
+            menu.addItem(item("Stop Dictation", #selector(stopDictation(_:))))
+            menu.addItem(item("Cancel Dictation", #selector(cancelDictation(_:))))
+        } else {
+            let start = item("Start Dictation", #selector(startDictation(_:)))
+            start.isEnabled = coordinator.phase == .idle || coordinator.phase == .failed
+            menu.addItem(start)
+        }
+        let paste = item("Paste Last Transcript", #selector(pasteLastTranscript(_:)))
+        let copy = item("Copy Last Transcript", #selector(copyLastTranscript(_:)))
+        paste.isEnabled = !coordinator.lastTranscript.isEmpty
+        copy.isEnabled = !coordinator.lastTranscript.isEmpty
+        menu.addItem(paste)
+        menu.addItem(copy)
+        menu.addItem(.separator())
+
+        menu.addItem(submenuItem("Microphone", items: microphoneMenuItems()))
+        menu.addItem(submenuItem("AI Cleanup", items: cleanupMenuItems()))
+        menu.addItem(.separator())
+
+        menu.addItem(item("Open Wisper Clone", #selector(showHub(_:))))
+        let settings = item("Settings…", #selector(showSettings(_:)))
+        settings.keyEquivalent = ","
+        menu.addItem(settings)
+        menu.addItem(.separator())
+        menu.addItem(
+            NSMenuItem(title: "Quit Wisper Clone", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         )
     }
 
-    // `.transient` behavior is supposed to auto-close on outside clicks, but that
-    // relies on the app becoming key/active — which never reliably happens for an
-    // `.accessory` (no Dock icon) app. A manual mouse-down monitor closes it instead.
-    private func startPopoverEventMonitor() {
-        stopPopoverEventMonitor()
-        popoverEventMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
-            self?.popover.performClose(nil)
+    private func item(_ title: String, _ action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    private func submenuItem(_ title: String, items: [NSMenuItem]) -> NSMenuItem {
+        let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: title)
+        submenu.autoenablesItems = false
+        items.forEach(submenu.addItem)
+        parent.submenu = submenu
+        return parent
+    }
+
+    private func microphoneMenuItems() -> [NSMenuItem] {
+        let selectedID = coordinator.preferences.selectedInputDeviceID
+        let automatic = item("Automatic", #selector(selectMicrophone(_:)))
+        automatic.state = selectedID == nil ? .on : .off
+        let devices = coordinator.inputDevices.map { device in
+            let deviceItem = item(device.displayName, #selector(selectMicrophone(_:)))
+            deviceItem.representedObject = device.id
+            deviceItem.state = selectedID == device.id ? .on : .off
+            return deviceItem
+        }
+        return [automatic, .separator()] + devices
+    }
+
+    private func cleanupMenuItems() -> [NSMenuItem] {
+        CleanupLevel.allCases.map { level in
+            let levelItem = item(level.displayName, #selector(selectCleanupLevel(_:)))
+            levelItem.representedObject = level.rawValue
+            levelItem.state = coordinator.preferences.cleanupLevel == level ? .on : .off
+            return levelItem
         }
     }
 
-    private func stopPopoverEventMonitor() {
-        if let popoverEventMonitor {
-            NSEvent.removeMonitor(popoverEventMonitor)
-        }
-        popoverEventMonitor = nil
+    @objc private func startDictation(_ sender: Any?) {
+        coordinator.beginRecording()
     }
 
-    func popoverWillClose(_ notification: Notification) {
-        stopPopoverEventMonitor()
+    @objc private func stopDictation(_ sender: Any?) {
+        coordinator.finishRecording()
+    }
+
+    @objc private func cancelDictation(_ sender: Any?) {
+        coordinator.cancelRecording()
+    }
+
+    @objc private func pasteLastTranscript(_ sender: Any?) {
+        coordinator.retryLastPaste()
+    }
+
+    @objc private func copyLastTranscript(_ sender: Any?) {
+        coordinator.copyLastTranscript()
+    }
+
+    @objc private func selectMicrophone(_ sender: NSMenuItem) {
+        coordinator.setSelectedInputDeviceID(sender.representedObject as? String)
+    }
+
+    @objc private func selectCleanupLevel(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let level = CleanupLevel(rawValue: rawValue) else { return }
+        coordinator.setCleanupLevel(level)
     }
 
     private func configureMainMenu() {
@@ -113,6 +224,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
+        appMenu.addItem(
+            NSMenuItem(title: "Hide Wisper Clone", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        )
+        appMenu.addItem(.separator())
         appMenu.addItem(
             NSMenuItem(
                 title: "Quit Wisper Clone",
@@ -134,6 +253,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
+
+        let windowMenuItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
+        windowMenu.addItem(NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+        NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
     }
@@ -158,44 +285,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
     }
 
-    private func updateStatusItem(for phase: DictationPhase) {
-        switch phase {
-        case .recording:
-            startRecordingStatusAnimation()
-        default:
-            stopRecordingStatusAnimation()
-            setStatusItem(symbolName: statusItemSymbolName(for: phase), title: "")
-        }
-    }
-
-    private func startRecordingStatusAnimation() {
-        guard recordingAnimationTimer == nil else { return }
-
-        recordingAnimationFrame = 0
-        updateRecordingStatusAnimationFrame()
-        recordingAnimationTimer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.updateRecordingStatusAnimationFrame()
+    private func observeMenuBarIconPreference() {
+        menuBarIconObserver = coordinator.$preferences
+            .map(\.isMenuBarIconVisible)
+            .removeDuplicates()
+            .sink { [weak self] isVisible in
+                self?.statusItem?.isVisible = isVisible
             }
-        }
     }
 
-    private func stopRecordingStatusAnimation() {
-        recordingAnimationTimer?.invalidate()
-        recordingAnimationTimer = nil
-        recordingAnimationFrame = 0
-    }
-
-    private func updateRecordingStatusAnimationFrame() {
-        let frames: [(symbolName: String, title: String)] = [
-            ("mic.circle.fill", " REC"),
-            ("record.circle.fill", " REC."),
-            ("mic.circle.fill", " REC.."),
-            ("waveform.circle.fill", " REC...")
-        ]
-        let frame = frames[recordingAnimationFrame % frames.count]
-        recordingAnimationFrame += 1
-        setStatusItem(symbolName: frame.symbolName, title: frame.title)
+    /// The icon changes with the phase but stays a quiet, fixed-width symbol: no text and
+    /// no animation in the menu bar. The Flow Bar is the place that shows a recording.
+    private func updateStatusItem(for phase: DictationPhase) {
+        setStatusItem(symbolName: statusItemSymbolName(for: phase), title: "")
     }
 
     private func setStatusItem(symbolName: String, title: String) {
@@ -242,15 +344,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
-    @objc private func togglePopover(_ sender: AnyObject?) {
-        guard let button = statusItem?.button else { return }
 
-        if popover.isShown {
-            popover.performClose(sender)
-        } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
-            startPopoverEventMonitor()
-        }
-    }
 }

@@ -1,126 +1,183 @@
 import SwiftUI
 
-/// The floating pill shown at the bottom of the screen while dictating.
-/// Purely informational — it never intercepts clicks to start/stop recording.
+/// The floating pill shown at the bottom of the screen. One capsule morphs between states:
+/// - Idle: a small outlined capsule.
+/// - Hold to dictate: a compact capsule with the live waveform.
+/// - Hands-free (double-tap): the waveform sits between a cancel and a confirm button,
+///   because there is no key release that would end the dictation.
+/// - Transcribing: a slightly wider capsule with resting dots and a spinner.
 struct FlowBarView: View {
     @ObservedObject var coordinator: DictationCoordinator
     @State private var isHovering = false
 
+    private enum Mode: Equatable {
+        case idle
+        case hint
+        case hold
+        case handsFree
+        case busy
+        case failed
+    }
+
+    private static let barCount = 10
+    private static let pillHeight: CGFloat = 28
+    private static let morph = Animation.spring(response: 0.32, dampingFraction: 0.82)
+    private static let confirmColor = Color(red: 0.2, green: 0.78, blue: 0.45)
+
     var body: some View {
-        content
-            .onHover { hovering in
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    isHovering = hovering
-                }
-            }
-            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: coordinator.phase)
+        pill
+            .onHover { isHovering = $0 }
+            .animation(Self.morph, value: mode)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+
+    private var mode: Mode {
+        switch coordinator.phase {
+        case .idle:
+            return isHovering ? .hint : .idle
+        case .recording:
+            return coordinator.isHandsFreeActive ? .handsFree : .hold
+        case .transcribing, .pasting:
+            return .busy
+        case .failed:
+            return .failed
+        }
+    }
+
+    private var pill: some View {
+        content
+            .frame(width: fixedWidth, height: mode == .idle ? 8 : Self.pillHeight)
+            .padding(.horizontal, fixedWidth == nil ? 12 : 0)
+            .background(Color.black.opacity(mode == .idle ? 0.55 : 0.92), in: Capsule())
+            .overlay(Capsule().strokeBorder(borderColor, lineWidth: 1))
+            .shadow(color: .black.opacity(0.25), radius: mode == .idle ? 2 : 5, y: 1)
+    }
+
+    /// Text states size themselves; every other state has a fixed width so the capsule
+    /// can animate between them.
+    private var fixedWidth: CGFloat? {
+        switch mode {
+        case .idle: return 40
+        case .hold: return 72
+        case .handsFree: return 124
+        case .busy: return 96
+        case .hint, .failed: return nil
+        }
+    }
+
+    private var borderColor: Color {
+        switch mode {
+        case .idle:
+            return .white.opacity(0.65)
+        case .failed:
+            return .red
+        default:
+            return coordinator.isCommandRecording ? Color.indigo : .white.opacity(0.18)
+        }
     }
 
     @ViewBuilder
     private var content: some View {
-        switch coordinator.phase {
+        switch mode {
         case .idle:
-            idlePill
-        case .recording:
-            recordingPill
-        case .transcribing, .pasting:
-            busyPill
-        case .failed:
-            failedPill
-        }
-    }
-
-    private var idlePill: some View {
-        Group {
-            if isHovering {
-                expandedPill {
-                    Text("Hold \(firstHotkeyDisplayName) to dictate")
-                        .font(.caption)
-                        .foregroundStyle(.white)
+            Color.clear
+        case .hint:
+            label("Hold \(firstHotkeyDisplayName) to dictate")
+        case .hold:
+            waveform
+                .transition(.opacity)
+        case .handsFree:
+            HStack(spacing: 0) {
+                roundButton(symbol: "xmark", foreground: .black, background: .white, help: "Cancel dictation") {
+                    coordinator.cancelRecording()
                 }
-            } else {
-                Capsule()
-                    .fill(Color.black.opacity(0.65))
-                    .frame(width: 56, height: 8)
-                    .shadow(radius: 3)
-            }
-        }
-    }
-
-    private var recordingPill: some View {
-        expandedPill {
-            HStack(spacing: 8) {
+                Spacer(minLength: 0)
                 waveform
-                if coordinator.isCommandRecording {
-                    Image(systemName: "wand.and.stars")
-                        .font(.caption)
-                        .foregroundStyle(.white)
-                }
-                if coordinator.isHandsFreeActive {
-                    Image(systemName: "infinity")
-                        .font(.caption)
-                        .foregroundStyle(.white)
+                Spacer(minLength: 0)
+                roundButton(symbol: "checkmark", foreground: .white, background: Self.confirmColor, help: "Finish and paste") {
+                    coordinator.finishRecording()
                 }
             }
+            .padding(.horizontal, 4)
+            .transition(.opacity)
+        case .busy:
+            HStack(spacing: 8) {
+                restingDots
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.7)
+                    .colorScheme(.dark)
+            }
+            .transition(.opacity)
+        case .failed:
+            label(coordinator.statusText)
         }
-        .overlay(
-            Capsule()
-                .strokeBorder(recordingAccentColor.opacity(0.8), lineWidth: 1.5)
-        )
     }
 
-    private var busyPill: some View {
-        expandedPill {
-            ProgressView()
-                .controlSize(.small)
-                .tint(.white)
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .fixedSize()
+            .transition(.opacity)
+    }
+
+    private func roundButton(
+        symbol: String,
+        foreground: Color,
+        background: Color,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(foreground)
+                .frame(width: 20, height: 20)
+                .background(background, in: Circle())
         }
-        .overlay(
-            Capsule()
-                .strokeBorder(coordinator.isCommandRecording ? Color.indigo.opacity(0.8) : Color.clear, lineWidth: 1.5)
-        )
+        .buttonStyle(.plain)
+        .help(help)
     }
 
-    private var recordingAccentColor: Color {
-        coordinator.isCommandRecording ? .indigo : Color(red: 0.2, green: 0.78, blue: 0.45)
-    }
+    // MARK: - Waveform
 
-    private var failedPill: some View {
-        expandedPill {
-            Text(coordinator.statusText)
-                .font(.caption)
-                .foregroundStyle(.white)
-        }
-        .overlay(
-            Capsule()
-                .strokeBorder(Color.red, lineWidth: 2)
-        )
-    }
-
+    /// Ten bars that ripple outward from the centre: the middle bars show the newest
+    /// level, the outer bars the level a few frames ago, scaled down toward the edges.
     private var waveform: some View {
-        HStack(spacing: 3) {
-            ForEach(Array(waveformSamples.enumerated()), id: \.offset) { _, level in
+        let levels = barLevels
+        return HStack(spacing: 2.5) {
+            ForEach(0..<Self.barCount, id: \.self) { index in
                 Capsule()
-                    .fill(recordingAccentColor)
-                    .frame(width: 3, height: max(4, CGFloat(level) * 24))
+                    .fill(Color.white)
+                    .frame(width: 2, height: 2 + levels[index] * 12)
             }
         }
-        .frame(height: 24)
+        .frame(height: 16)
+        .animation(.easeOut(duration: 0.1), value: levels)
     }
 
-    private var waveformSamples: [Float] {
-        Array(coordinator.audioLevels.suffix(20))
+    private var barLevels: [CGFloat] {
+        let samples = coordinator.audioLevels
+        let centre = CGFloat(Self.barCount - 1) / 2
+        return (0..<Self.barCount).map { index in
+            let distance = abs(CGFloat(index) - centre)
+            let sampleIndex = samples.count - 1 - Int(distance.rounded(.down)) * 2
+            guard sampleIndex >= 0 else { return 0 }
+            let envelope = 1 - distance / (centre + 1.5)
+            return min(1, CGFloat(samples[sampleIndex]) * 1.8) * envelope
+        }
     }
 
-    @ViewBuilder
-    private func expandedPill<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: Capsule())
-            .background(Color.black.opacity(0.4), in: Capsule())
-            .shadow(radius: 6)
+    private var restingDots: some View {
+        HStack(spacing: 2.5) {
+            ForEach(0..<Self.barCount, id: \.self) { _ in
+                Capsule()
+                    .fill(Color.white.opacity(0.45))
+                    .frame(width: 2, height: 2)
+            }
+        }
     }
 
     private var firstHotkeyDisplayName: String {

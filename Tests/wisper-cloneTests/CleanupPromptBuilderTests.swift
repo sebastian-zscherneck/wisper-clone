@@ -168,3 +168,28 @@ func cleanupPromptBuilder_includesLevelMarkerAndAlwaysRules(level: CleanupLevel,
     #expect(!message.contains("For reference"))
     #expect(!message.contains("the meeting is at 3pm"))
 }
+
+@Test func localSystemPrompt_staysCompactAndCarriesVocabularyAndRules() {
+    let prompt = CleanupPromptBuilder().buildLocalSystemPrompt(
+        level: .medium,
+        vocabulary: ["Störtebekker"],
+        rules: ["Never use exclamation marks"]
+    )
+
+    #expect(prompt.contains("Never translate"))
+    #expect(prompt.contains(CleanupPromptBuilder.localMediumInstructions))
+    #expect(prompt.contains("Störtebekker"))
+    #expect(prompt.contains("Never use exclamation marks"))
+    #expect(prompt.count < CleanupPromptBuilder().buildSystemPrompt(
+        level: .medium,
+        tone: AppToneProfile.profile(forBundleID: nil, windowTitle: nil),
+        vocabulary: ["Störtebekker"],
+        rules: ["Never use exclamation marks"]
+    ).count)
+}
+
+@Test func localSystemPrompt_lightLevelAddsNoExtraInstructions() {
+    let prompt = CleanupPromptBuilder().buildLocalSystemPrompt(level: .light)
+
+    #expect(prompt == CleanupPromptBuilder.localBasePrompt)
+}

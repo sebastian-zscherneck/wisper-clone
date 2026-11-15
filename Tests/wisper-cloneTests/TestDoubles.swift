@@ -286,12 +286,21 @@ func makeCoordinator(
     // Fresh isolated UserDefaults suites per coordinator so parallel tests never race
     // on shared rule/dictionary state the way bare `.standard`-backed stores would.
     personalRulesStore: PersonalRulesStore = PersonalRulesStore(defaults: UserDefaults(suiteName: "wisper-clone-test-rules-\(UUID().uuidString)")!),
-    personalDictionaryStore: PersonalDictionaryStore = PersonalDictionaryStore(defaults: UserDefaults(suiteName: "wisper-clone-test-dictionary-\(UUID().uuidString)")!)
+    personalDictionaryStore: PersonalDictionaryStore = PersonalDictionaryStore(defaults: UserDefaults(suiteName: "wisper-clone-test-dictionary-\(UUID().uuidString)")!),
+    engine: ProcessingEngine = .openAI,
+    feedback: SpyFeedback = SpyFeedback()
 ) -> DictationCoordinator {
+    // Existing flow tests exercise the OpenAI engine (API key handling included). The same
+    // spies also stand in for the local engine so a test can switch engines.
+    var initialPreferences = preferencesStore.loadPreferences()
+    initialPreferences.engine = engine
+    preferencesStore.savePreferences(initialPreferences)
     let coordinator = DictationCoordinator(
         audioRecorder: recorder,
         transcriptionClient: transcriber,
         chatClient: chatClient,
+        localTranscriptionClient: transcriber,
+        localChatClient: chatClient,
         credentialStore: credentialStore,
         paster: pasteboard,
         notifier: notifier,
@@ -302,6 +311,7 @@ func makeCoordinator(
         preferencesStore: preferencesStore,
         historyStore: historyStore,
         selectedTextCapturer: selectedTextCapturer,
+        feedback: feedback,
         warmUpConnection: {} // no-op in tests: never hit the real network
     )
     // Flow tests start and finish recordings within milliseconds; disable the
@@ -431,4 +441,20 @@ final class StubURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+/// Records feedback events instead of playing sounds, so tests stay silent.
+@MainActor
+final class SpyFeedback: DictationFeedbackProviding {
+    struct Signal: Equatable {
+        let event: FeedbackEvent
+        let sound: Bool
+        let haptic: Bool
+    }
+
+    private(set) var signals: [Signal] = []
+
+    func signal(_ event: FeedbackEvent, sound: Bool, haptic: Bool) {
+        signals.append(.init(event: event, sound: sound, haptic: haptic))
+    }
 }
