@@ -13,13 +13,17 @@ struct SystemSettingsPane: View {
                     set: { coordinator.setLaunchAtLogin($0) }
                 )
             )
-            Toggle(
-                "Show Flow Bar at all times",
-                isOn: Binding(
-                    get: { coordinator.preferences.showFlowBar },
-                    set: { coordinator.preferences.showFlowBar = $0 }
+            Picker(
+                "Show Flow Bar",
+                selection: Binding(
+                    get: { coordinator.preferences.flowBarVisibility },
+                    set: { coordinator.preferences.flowBarVisibility = $0 }
                 )
-            )
+            ) {
+                ForEach(FlowBarVisibility.allCases) { visibility in
+                    Text(visibility.displayName).tag(visibility)
+                }
+            }
             Toggle(
                 "Show app in Dock",
                 isOn: Binding(

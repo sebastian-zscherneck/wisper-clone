@@ -8,7 +8,7 @@ protocol AudioRecording {
     var currentAudioLevel: Float { get }
     func requestPermission() async -> Bool
     func availableInputDevices() -> [AudioInputDevice]
-    func startRecording() throws -> URL
+    func startRecording() async throws -> URL
     func stopRecording() async throws -> URL
     func cancelRecording()
 }
@@ -31,7 +31,11 @@ final class AudioRecorderService: NSObject, AudioRecording, AVCaptureFileOutputR
     }
 
     func requestPermission() async -> Bool {
-        await withCheckedContinuation { continuation in
+        // Already granted: skip the round trip to the permission service on every press.
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+            return true
+        }
+        return await withCheckedContinuation { continuation in
             AVCaptureDevice.requestAccess(for: .audio) { granted in
                 continuation.resume(returning: granted)
             }
@@ -48,7 +52,7 @@ final class AudioRecorderService: NSObject, AudioRecording, AVCaptureFileOutputR
         }
     }
 
-    func startRecording() throws -> URL {
+    func startRecording() async throws -> URL {
         guard !isRecording else {
             if let currentFileURL {
                 return currentFileURL
@@ -79,13 +83,25 @@ final class AudioRecorderService: NSObject, AudioRecording, AVCaptureFileOutputR
             .appendingPathComponent("wisper-\(UUID().uuidString)")
             .appendingPathExtension("m4a")
 
-        session.startRunning()
+        // startRunning blocks until the hardware answers. Off the main thread the Flow Bar
+        // keeps animating meanwhile. The session is stored first so a cancel can stop it.
+        self.session = session
+        nonisolated(unsafe) let startingSession = session
+        await Task.detached(priority: .userInitiated) {
+            startingSession.startRunning()
+        }.value
+        guard self.session === session else {
+            session.stopRunning()
+            throw CancellationError()
+        }
         guard session.isRunning else {
+            self.session = nil
             throw DictationError.recordingUnavailable
         }
 
         guard AVCaptureAudioFileOutput.availableOutputFileTypes().contains(.m4a) else {
             session.stopRunning()
+            self.session = nil
             throw DictationError.recordingUnavailable
         }
 
@@ -104,7 +120,6 @@ final class AudioRecorderService: NSObject, AudioRecording, AVCaptureFileOutputR
             recordingDelegate: self
         )
 
-        self.session = session
         self.fileOutput = fileOutput
         currentFileURL = fileURL
         return fileURL

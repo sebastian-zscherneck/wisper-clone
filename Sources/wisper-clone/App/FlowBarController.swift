@@ -7,7 +7,10 @@ import SwiftUI
 final class FlowBarController: NSObject {
     private static let panelSize = NSSize(width: 320, height: 64)
 
+    private static let fadeOutDuration: TimeInterval = 0.15
+
     private let panel: NSPanel
+    private var visibilityGeneration = 0
 
     init(coordinator: DictationCoordinator) {
         let panel = NSPanel(
@@ -42,13 +45,29 @@ final class FlowBarController: NSObject {
         NotificationCenter.default.removeObserver(self)
     }
 
+    /// Appears at once: the hotkey press must be visible in the same frame. Only leaving
+    /// is animated, so a finished dictation does not vanish abruptly.
     func show() {
+        visibilityGeneration += 1
         reposition()
+        panel.alphaValue = 1
         panel.orderFrontRegardless()
     }
 
     func hide() {
-        panel.orderOut(nil)
+        guard panel.isVisible else { return }
+        visibilityGeneration += 1
+        let generation = visibilityGeneration
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.fadeOutDuration
+            panel.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                // A new show() during the fade wins.
+                guard let self, self.visibilityGeneration == generation else { return }
+                self.panel.orderOut(nil)
+            }
+        }
     }
 
     @objc private func handleScreenParametersChanged() {

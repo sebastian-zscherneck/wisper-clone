@@ -31,7 +31,7 @@ struct AppPreferences: Equatable, Sendable {
     var selectedInputDeviceID: String? = nil
     var cleanupLevel: CleanupLevel = .none
     var commandHotkey: HotkeyBinding? = nil
-    var showFlowBar: Bool = true
+    var flowBarVisibility: FlowBarVisibility = .always
     var transcriptionQuality: TranscriptionQuality = .accurate
     var signature = SignatureSettings()
     var signatureHotkey: HotkeyBinding? = nil
@@ -40,9 +40,91 @@ struct AppPreferences: Equatable, Sendable {
     var showMenuBarIcon: Bool = false
     var enableSounds: Bool = false
     var enableHaptics: Bool = false
+    var localSpeechModel: LocalSpeechModel = .parakeetUltra
+    /// Corrects dictionary terms against the audio itself (local engine only).
+    var boostDictionaryTerms: Bool = true
+    var localCleanupEngine: LocalCleanupEngine = .appleIntelligence
 
     /// The app must stay reachable: without a Dock icon the menu bar icon is always shown.
     var isMenuBarIconVisible: Bool { showMenuBarIcon || !showInDock }
+}
+
+/// When the Flow Bar at the bottom of the screen is on screen.
+enum FlowBarVisibility: String, CaseIterable, Identifiable, Sendable {
+    case always
+    /// Hidden while idle; appears with the hotkey press and leaves after the paste.
+    case whileDictating
+    case never
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .always:
+            return "Always"
+        case .whileDictating:
+            return "Only while dictating"
+        case .never:
+            return "Never"
+        }
+    }
+
+    func showsPanel(during phase: DictationPhase) -> Bool {
+        switch self {
+        case .always:
+            return true
+        case .whileDictating:
+            return phase != .idle
+        case .never:
+            return false
+        }
+    }
+}
+
+/// The on-device speech-to-text model. All of them run through FluidAudio.
+enum LocalSpeechModel: String, CaseIterable, Identifiable, Sendable {
+    /// Post-trained Parakeet v3: same speed, fewer word errors.
+    case parakeetUltra
+    case parakeetV3
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .parakeetUltra:
+            return "Parakeet Ultra (recommended)"
+        case .parakeetV3:
+            return "Parakeet v3"
+        }
+    }
+
+    var shortName: String {
+        switch self {
+        case .parakeetUltra:
+            return "Parakeet Ultra"
+        case .parakeetV3:
+            return "Parakeet v3"
+        }
+    }
+}
+
+/// What tidies the transcript when the local engine is selected.
+enum LocalCleanupEngine: String, CaseIterable, Identifiable, Sendable {
+    /// Apple's on-device language model. Supports every cleanup level, takes seconds on long text.
+    case appleIntelligence
+    /// Fixed rules without a language model: removes fillers and repeated words. Instant.
+    case rules
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .appleIntelligence:
+            return "Apple Intelligence"
+        case .rules:
+            return "Fast (no language model)"
+        }
+    }
 }
 
 /// Where speech-to-text and AI text processing run.

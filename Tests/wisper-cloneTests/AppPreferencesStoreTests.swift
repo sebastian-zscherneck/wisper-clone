@@ -30,7 +30,7 @@ import Testing
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let store = UserDefaultsAppPreferencesStore(defaults: defaults)
 
-    #expect(store.loadPreferences().showFlowBar == true)
+    #expect(store.loadPreferences().flowBarVisibility == .always)
 }
 
 @Test func preferencesStore_roundTripsShowFlowBar() throws {
@@ -40,10 +40,10 @@ import Testing
     let store = UserDefaultsAppPreferencesStore(defaults: defaults)
 
     var preferences = AppPreferences()
-    preferences.showFlowBar = false
+    preferences.flowBarVisibility = .whileDictating
     store.savePreferences(preferences)
 
-    #expect(store.loadPreferences().showFlowBar == false)
+    #expect(store.loadPreferences().flowBarVisibility == .whileDictating)
 }
 
 @Test func preferencesStore_roundTripsCommandHotkey() throws {
@@ -253,4 +253,42 @@ import Testing
 
     #expect(store.loadPreferences().enableSounds == true)
     #expect(store.loadPreferences().enableHaptics == true)
+}
+
+@Test func preferencesStore_migratesLegacyHiddenFlowBarToNever() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set(false, forKey: "preferences.showFlowBar")
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+
+    #expect(store.loadPreferences().flowBarVisibility == .never)
+}
+
+@Test func preferencesStore_roundTripsLocalModelSettings() throws {
+    let suiteName = "wisper-clone-preferences-test-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UserDefaultsAppPreferencesStore(defaults: defaults)
+    #expect(store.loadPreferences().localSpeechModel == .parakeetUltra)
+
+    var preferences = AppPreferences()
+    preferences.localSpeechModel = .parakeetV3
+    preferences.boostDictionaryTerms = false
+    preferences.localCleanupEngine = .rules
+    store.savePreferences(preferences)
+
+    let loaded = store.loadPreferences()
+    #expect(loaded.localSpeechModel == .parakeetV3)
+    #expect(loaded.boostDictionaryTerms == false)
+    #expect(loaded.localCleanupEngine == .rules)
+}
+
+@Test func flowBarVisibility_whileDictatingHidesOnlyWhenIdle() {
+    #expect(FlowBarVisibility.whileDictating.showsPanel(during: .idle) == false)
+    #expect(FlowBarVisibility.whileDictating.showsPanel(during: .recording) == true)
+    #expect(FlowBarVisibility.whileDictating.showsPanel(during: .transcribing) == true)
+    #expect(FlowBarVisibility.whileDictating.showsPanel(during: .failed) == true)
+    #expect(FlowBarVisibility.always.showsPanel(during: .idle) == true)
+    #expect(FlowBarVisibility.never.showsPanel(during: .recording) == false)
 }

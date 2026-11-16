@@ -328,7 +328,12 @@ func expectPhase(
     sourceLocation: SourceLocation = #_sourceLocation
 ) async throws {
     let start = ContinuousClock.now
-    while coordinator.phase != expected {
+    // `.recording` is set with the key press, before the microphone is open. The flows
+    // under test continue from a running recording, so wait for that as well.
+    func isReached() -> Bool {
+        coordinator.phase == expected && (expected != .recording || coordinator.isMicrophoneOpen)
+    }
+    while !isReached() {
         if ContinuousClock.now - start > timeout {
             Issue.record(
                 "Expected phase \(expected), got \(coordinator.phase)",

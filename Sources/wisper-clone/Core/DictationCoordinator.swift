@@ -64,6 +64,9 @@ final class DictationCoordinator: ObservableObject {
     private var audioLevelTimer: Timer?
     private var recordingPeakLevel: Float = 0
     private var recordingStartedAt: ContinuousClock.Instant?
+    /// `phase` switches to `.recording` with the key press; this turns true once audio is
+    /// actually being captured.
+    var isMicrophoneOpen: Bool { phase == .recording && recordingStartedAt != nil }
     // Recordings shorter than this are discarded without any transcription or output:
     // accidental hotkey taps produce silent/near-empty audio that Whisper-family models
     // answer with hallucinated prompt content. Internal so tests can lower it.
@@ -71,6 +74,7 @@ final class DictationCoordinator: ObservableObject {
     /// How long a failure stays on screen before the app returns to idle.
     var failureDisplayDuration: Duration = .seconds(4)
     private var failureGeneration = 0
+    private var localModelGeneration = 0
     private var recordingLevelSampleCount = 0
     private static let maxAudioLevelSamples = 40
     // Below this normalized peak level a recording is treated as silence. Whisper-family
@@ -227,6 +231,7 @@ final class DictationCoordinator: ObservableObject {
         if preferences.engine == .openAI {
             warmUpConnection()
         } else if mode == .dictation, preferences.cleanupLevel != .none,
+                  preferences.localCleanupEngine == .appleIntelligence,
                   let prewarming = localChatClient as? ChatPrewarming {
             // Load the cleanup prompt into the on-device model while the user is still
             // speaking, so the cleanup itself starts without a cold start.
@@ -247,22 +252,36 @@ final class DictationCoordinator: ObservableObject {
             }
         }
 
+        // The Flow Bar follows `phase`, so switch it with the key press itself. Opening the
+        // microphone takes a moment and must not delay the visible reaction.
+        recordingStartedAt = nil
+        phase = .recording
+        statusText = recordingStatusText
+
         Task {
             let granted = await audioRecorder.requestPermission()
+            guard generation == captureGeneration, phase == .recording else { return }
             guard granted else {
                 fail(DictationError.microphoneDenied)
                 return
             }
 
             do {
-                _ = try audioRecorder.startRecording()
-                phase = .recording
+                _ = try await audioRecorder.startRecording()
+                guard generation == captureGeneration, phase == .recording else {
+                    // Released or cancelled while the microphone was still opening.
+                    if phase == .idle || phase == .failed {
+                        audioRecorder.cancelRecording()
+                    }
+                    return
+                }
                 signal(.started)
                 recordingStartedAt = .now
-                statusText = recordingStatusText
                 onRecordingStarted?()
                 startAudioLevelTimer()
             } catch {
+                // After a release or cancel the aborted start is expected, not a failure.
+                guard generation == captureGeneration, phase == .recording else { return }
                 fail(error)
             }
         }
@@ -273,7 +292,11 @@ final class DictationCoordinator: ObservableObject {
         isHandsFreeActive = false
         stopAudioLevelTimer()
 
-        if let startedAt = recordingStartedAt, ContinuousClock.now - startedAt < minimumRecordingDuration {
+        guard let startedAt = recordingStartedAt else {
+            discardRecording(reason: "released before the microphone opened")
+            return
+        }
+        if ContinuousClock.now - startedAt < minimumRecordingDuration {
             discardRecording(reason: "below minimum duration")
             return
         }
@@ -346,6 +369,7 @@ final class DictationCoordinator: ObservableObject {
         dictionaryTerms.append(trimmed)
         personalDictionaryStore.saveTerms(dictionaryTerms)
         dictionaryTerms = personalDictionaryStore.loadTerms()
+        prepareLocalModelsIfNeeded(reload: true)
         statusText = "Dictionary updated"
     }
 
@@ -356,6 +380,7 @@ final class DictationCoordinator: ObservableObject {
         }
         personalDictionaryStore.saveTerms(dictionaryTerms)
         dictionaryTerms = personalDictionaryStore.loadTerms()
+        prepareLocalModelsIfNeeded(reload: true)
         statusText = "Dictionary updated"
     }
 
@@ -730,6 +755,13 @@ final class DictationCoordinator: ObservableObject {
             let rawWordCount = raw.split(whereSeparator: \.isWhitespace).count
             if preferences.cleanupLevel == .none {
                 // Cleanup disabled; nothing to skip or run.
+            } else if isLocal, preferences.localCleanupEngine == .rules {
+                let cleanupStart = clock.now
+                let tidied = FillerRemover.clean(raw)
+                if !tidied.isEmpty {
+                    final = tidied
+                }
+                cleanupDuration = clock.now - cleanupStart
             } else if rawWordCount < Self.minimumWordsForCleanup {
                 logger.debug("cleanup skipped: transcript below word threshold")
             } else {
@@ -930,18 +962,40 @@ final class DictationCoordinator: ObservableObject {
         prepareLocalModelsIfNeeded()
     }
 
+    func setLocalSpeechModel(_ model: LocalSpeechModel) {
+        guard preferences.localSpeechModel != model else { return }
+        preferences.localSpeechModel = model
+        prepareLocalModelsIfNeeded(reload: true)
+    }
+
+    func setBoostDictionaryTerms(_ enabled: Bool) {
+        preferences.boostDictionaryTerms = enabled
+        prepareLocalModelsIfNeeded(reload: true)
+    }
+
+    func setLocalCleanupEngine(_ engine: LocalCleanupEngine) {
+        preferences.localCleanupEngine = engine
+    }
+
     /// Loads the local speech model in the background so the first dictation does not
-    /// wait for it. Safe to call repeatedly.
-    func prepareLocalModelsIfNeeded() {
+    /// wait for it. Safe to call repeatedly. `reload` applies a changed model or dictionary.
+    func prepareLocalModelsIfNeeded(reload: Bool = false) {
         guard preferences.engine == .local,
-              let preparing = localTranscriptionClient as? LocalModelPreparing,
-              localModelState != .loading, localModelState != .ready else { return }
+              let preparing = localTranscriptionClient as? LocalModelPreparing else { return }
+        guard reload || (localModelState != .loading && localModelState != .ready) else { return }
         localModelState = .loading
+        localModelGeneration += 1
+        let generation = localModelGeneration
+        let model = preferences.localSpeechModel
+        let vocabulary = preferences.boostDictionaryTerms ? dictionaryTerms : []
         Task {
             do {
+                await preparing.configure(model: model, vocabulary: vocabulary)
                 try await preparing.prepare()
+                guard generation == localModelGeneration else { return }
                 localModelState = .ready
             } catch {
+                guard generation == localModelGeneration else { return }
                 localModelState = .failed(error.localizedDescription)
                 logger.error("local model load failed: \(error.localizedDescription, privacy: .public)")
             }

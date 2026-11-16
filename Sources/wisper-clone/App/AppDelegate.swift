@@ -274,10 +274,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func observeFlowBarPreference() {
         flowBarPreferencesObserver = coordinator.$preferences
-            .map(\.showFlowBar)
+            .map(\.flowBarVisibility)
+            .combineLatest(coordinator.$phase)
+            .map { visibility, phase in visibility.showsPanel(during: phase) }
             .removeDuplicates()
-            .sink { [weak self] showFlowBar in
-                if showFlowBar {
+            .sink { [weak self] isVisible in
+                if isVisible {
                     self?.flowBarController.show()
                 } else {
                     self?.flowBarController.hide()

@@ -250,3 +250,29 @@ func dictationFlow_usesModelForSelectedTranscriptionQuality(quality: Transcripti
 
     #expect(transcriber.requests.first?.model == expectedModel)
 }
+
+@MainActor
+@Test func recordingFlow_showsRecordingWithTheKeyPressAndDiscardsAReleaseBeforeTheMicrophoneOpened() async throws {
+    let audioURL = FileManager.default.temporaryDirectory.appendingPathComponent("instant-\(UUID().uuidString).m4a")
+    let recorder = SpyRecorder(recordedFileURL: audioURL)
+    let transcriber = SpyTranscriptionClient(result: "never used")
+    let coordinator = makeCoordinator(
+        recorder: recorder,
+        transcriber: transcriber,
+        pasteboard: SpyPasteboard(),
+        credentialStore: SpyCredentialStore(apiKey: "test-key")
+    )
+
+    coordinator.beginRecording()
+    // No await in between: the Flow Bar must react in the same turn as the key press.
+    #expect(coordinator.phase == .recording)
+    #expect(coordinator.isMicrophoneOpen == false)
+
+    coordinator.finishRecording()
+    #expect(coordinator.phase == .idle)
+
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(coordinator.phase == .idle)
+    #expect(recorder.isRecording == false)
+    #expect(transcriber.requests.isEmpty)
+}

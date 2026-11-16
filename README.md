@@ -39,7 +39,7 @@ Pick the engine under Settings → Transcription & AI.
 
 | Engine | Speech-to-text | AI cleanup and Command Mode | Needs |
 |---|---|---|---|
-| On this Mac (default) | Parakeet TDT v3 via [FluidAudio](https://github.com/FluidInference/FluidAudio), about 600 MB, downloaded once | Apple's on-device language model | Apple Silicon. Cleanup and Command Mode need macOS 26 with Apple Intelligence turned on |
+| On this Mac (default) | Parakeet Ultra or Parakeet v3 via [FluidAudio](https://github.com/FluidInference/FluidAudio), about 600 MB, downloaded once. Dictionary words are boosted against the audio with Parakeet CTC (about 100 MB) | Apple's on-device language model, or fast rule-based cleanup without a language model | Apple Silicon. Cleanup and Command Mode need macOS 26 with Apple Intelligence turned on |
 | OpenAI API | `gpt-4o-transcribe` / `gpt-4o-mini-transcribe` | `gpt-4o-mini`, `gpt-5.4-mini` | Your own API key |
 
 The on-device language model is small. It uses its own short cleanup prompt (`CleanupPromptBuilder.localBasePrompt`) and no per-app tone. Parakeet detects the language itself, so the language setting only applies to OpenAI.

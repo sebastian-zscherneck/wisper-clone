@@ -39,21 +39,66 @@ struct ModelsSettingsPane: View {
     }
 
     private var localSection: some View {
-        Section("On-Device Models") {
-            LabeledContent("Speech recognition") {
-                StatusLabel(text: speechModelText, state: speechModelIndicator)
-            }
-            LabeledContent("Language model") {
-                StatusLabel(
-                    text: languageModelReason ?? "Apple Intelligence · ready",
-                    state: languageModelReason == nil ? .ok : .warning
+        Section {
+            Picker(
+                "Speech model",
+                selection: Binding(
+                    get: { coordinator.preferences.localSpeechModel },
+                    set: { coordinator.setLocalSpeechModel($0) }
                 )
+            ) {
+                ForEach(LocalSpeechModel.allCases) { model in
+                    Text(model.displayName).tag(model)
+                }
+            }
+            LabeledContent("Status") {
+                StatusLabel(text: speechModelText, state: speechModelIndicator)
             }
             if case .failed = coordinator.localModelState {
                 Button("Try Again") {
                     coordinator.prepareLocalModelsIfNeeded()
                 }
             }
+            Toggle(
+                "Boost dictionary words",
+                isOn: Binding(
+                    get: { coordinator.preferences.boostDictionaryTerms },
+                    set: { coordinator.setBoostDictionaryTerms($0) }
+                )
+            )
+            Picker(
+                "Text cleanup",
+                selection: Binding(
+                    get: { coordinator.preferences.localCleanupEngine },
+                    set: { coordinator.setLocalCleanupEngine($0) }
+                )
+            ) {
+                ForEach(LocalCleanupEngine.allCases) { engine in
+                    Text(engine.displayName).tag(engine)
+                }
+            }
+            if coordinator.preferences.localCleanupEngine == .appleIntelligence {
+                LabeledContent("Language model") {
+                    StatusLabel(
+                        text: languageModelReason ?? "Apple Intelligence · ready",
+                        state: languageModelReason == nil ? .ok : .warning
+                    )
+                }
+            }
+        } header: {
+            Text("On-Device Models")
+        } footer: {
+            Text(localFooterText)
+        }
+    }
+
+    private var localFooterText: String {
+        let boosting = "Boosting checks the words from your dictionary against the audio, so names and jargon are spelled right. A new speech model is downloaded once (about 600 MB)."
+        switch coordinator.preferences.localCleanupEngine {
+        case .appleIntelligence:
+            return boosting + " Apple Intelligence supports every cleanup level, but takes several seconds on long dictations."
+        case .rules:
+            return boosting + " Fast cleanup removes filler sounds and repeated words without a language model, so long dictations paste right away. Medium and High behave like Light."
         }
     }
 
@@ -128,11 +173,11 @@ struct ModelsSettingsPane: View {
     private var speechModelText: String {
         switch coordinator.localModelState {
         case .notLoaded:
-            return "Parakeet v3 · not loaded"
+            return "\(coordinator.preferences.localSpeechModel.shortName) · not loaded"
         case .loading:
-            return "Parakeet v3 · loading…"
+            return "\(coordinator.preferences.localSpeechModel.shortName) · loading…"
         case .ready:
-            return "Parakeet v3 · ready"
+            return "\(coordinator.preferences.localSpeechModel.shortName) · ready"
         case .failed(let message):
             return message
         }

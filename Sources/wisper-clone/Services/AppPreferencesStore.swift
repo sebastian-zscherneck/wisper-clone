@@ -15,6 +15,7 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     private let selectedInputDeviceIDKey = "preferences.selectedInputDeviceID"
     private let cleanupLevelKey = "preferences.cleanupLevel"
     private let commandHotkeyKey = "preferences.commandHotkey"
+    // Legacy on/off switch, replaced by `flowBarVisibilityKey`; read once for migration.
     private let showFlowBarKey = "preferences.showFlowBar"
     private let transcriptionQualityKey = "preferences.transcriptionQuality"
     private let signatureKey = "preferences.signature"
@@ -24,6 +25,10 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
     private let showMenuBarIconKey = "preferences.showMenuBarIcon"
     private let enableSoundsKey = "preferences.enableSounds"
     private let enableHapticsKey = "preferences.enableHaptics"
+    private let flowBarVisibilityKey = "preferences.flowBarVisibility"
+    private let localSpeechModelKey = "preferences.localSpeechModel"
+    private let boostDictionaryTermsKey = "preferences.boostDictionaryTerms"
+    private let localCleanupEngineKey = "preferences.localCleanupEngine"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -61,8 +66,25 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
             preferences.commandHotkey = HotkeyBinding(legacyHotkeyRawValue: rawCommandHotkey)
         }
 
-        if defaults.object(forKey: showFlowBarKey) != nil {
-            preferences.showFlowBar = defaults.bool(forKey: showFlowBarKey)
+        if let rawVisibility = defaults.string(forKey: flowBarVisibilityKey),
+           let visibility = FlowBarVisibility(rawValue: rawVisibility) {
+            preferences.flowBarVisibility = visibility
+        } else if defaults.object(forKey: showFlowBarKey) != nil {
+            preferences.flowBarVisibility = defaults.bool(forKey: showFlowBarKey) ? .always : .never
+        }
+
+        if let rawModel = defaults.string(forKey: localSpeechModelKey),
+           let model = LocalSpeechModel(rawValue: rawModel) {
+            preferences.localSpeechModel = model
+        }
+
+        if defaults.object(forKey: boostDictionaryTermsKey) != nil {
+            preferences.boostDictionaryTerms = defaults.bool(forKey: boostDictionaryTermsKey)
+        }
+
+        if let rawCleanupEngine = defaults.string(forKey: localCleanupEngineKey),
+           let cleanupEngine = LocalCleanupEngine(rawValue: rawCleanupEngine) {
+            preferences.localCleanupEngine = cleanupEngine
         }
 
         if let rawTranscriptionQuality = defaults.string(forKey: transcriptionQualityKey),
@@ -109,7 +131,10 @@ struct UserDefaultsAppPreferencesStore: AppPreferencesStoring {
         }
         defaults.set(preferences.languageMode.rawValue, forKey: languageModeKey)
         defaults.set(preferences.cleanupLevel.rawValue, forKey: cleanupLevelKey)
-        defaults.set(preferences.showFlowBar, forKey: showFlowBarKey)
+        defaults.set(preferences.flowBarVisibility.rawValue, forKey: flowBarVisibilityKey)
+        defaults.set(preferences.localSpeechModel.rawValue, forKey: localSpeechModelKey)
+        defaults.set(preferences.boostDictionaryTerms, forKey: boostDictionaryTermsKey)
+        defaults.set(preferences.localCleanupEngine.rawValue, forKey: localCleanupEngineKey)
         defaults.set(preferences.transcriptionQuality.rawValue, forKey: transcriptionQualityKey)
         defaults.set(preferences.engine.rawValue, forKey: engineKey)
         defaults.set(preferences.showInDock, forKey: showInDockKey)
