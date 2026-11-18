@@ -14,16 +14,22 @@ protocol DictationFeedbackProviding {
     func signal(_ event: FeedbackEvent, sound: Bool, haptic: Bool)
 }
 
-/// Short synthesized tones plus haptic taps. The tones are generated in code, so the
-/// app ships no audio files.
+/// Short tones plus haptic taps. The tones are synthesized in code, so the app ships no
+/// audio files; a WAV file in the user's sounds folder replaces the tone of its event.
 @MainActor
 final class DictationFeedback: DictationFeedbackProviding {
+    private static let synthesizedVolume: Float = 0.35
+
     private var players: [FeedbackEvent: AVAudioPlayer] = [:]
 
-    init() {
+    init(soundsDirectory: URL? = FeedbackSoundLibrary.defaultDirectory) {
         for event in FeedbackEvent.allCases {
-            guard let player = try? AVAudioPlayer(data: ToneSynthesizer.wavData(for: event)) else { continue }
-            player.volume = 0.35
+            let sound = FeedbackSoundLibrary.sound(for: event, in: soundsDirectory)
+            // A custom file that is not playable audio must not silence the event.
+            guard let player = (try? AVAudioPlayer(data: sound.data))
+                ?? (try? AVAudioPlayer(data: ToneSynthesizer.wavData(for: event))) else { continue }
+            // Custom files play as authored; the synthesized tones are loud at full volume.
+            player.volume = sound.isCustom ? 1 : Self.synthesizedVolume
             player.prepareToPlay()
             players[event] = player
         }
@@ -41,6 +47,38 @@ final class DictationFeedback: DictationFeedbackProviding {
                 performanceTime: .now
             )
         }
+    }
+}
+
+/// Finds the sound of an event: `<event>.wav` in the sounds folder, else the built-in tone.
+enum FeedbackSoundLibrary {
+    struct Sound: Equatable {
+        let data: Data
+        let isCustom: Bool
+    }
+
+    /// ~/Library/Application Support/WisperClone/Sounds
+    static var defaultDirectory: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("WisperClone", isDirectory: true)
+            .appendingPathComponent("Sounds", isDirectory: true)
+    }
+
+    static func fileName(for event: FeedbackEvent) -> String {
+        switch event {
+        case .started: return "started.wav"
+        case .finished: return "finished.wav"
+        case .cancelled: return "cancelled.wav"
+        case .failed: return "failed.wav"
+        }
+    }
+
+    static func sound(for event: FeedbackEvent, in directory: URL?) -> Sound {
+        if let directory,
+           let data = try? Data(contentsOf: directory.appendingPathComponent(fileName(for: event))) {
+            return Sound(data: data, isCustom: true)
+        }
+        return Sound(data: ToneSynthesizer.wavData(for: event), isCustom: false)
     }
 }
 

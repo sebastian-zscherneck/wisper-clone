@@ -67,3 +67,20 @@ import Testing
         #expect(String(decoding: data.prefix(4), as: UTF8.self) == "RIFF")
     }
 }
+
+@Test func feedbackSounds_preferACustomFileAndFallBackToTheSynthesizedTone() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("wisper-sounds-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let custom = Data("custom".utf8)
+    try custom.write(to: directory.appendingPathComponent("started.wav"))
+
+    let started = FeedbackSoundLibrary.sound(for: .started, in: directory)
+    let finished = FeedbackSoundLibrary.sound(for: .finished, in: directory)
+    let withoutDirectory = FeedbackSoundLibrary.sound(for: .started, in: nil)
+
+    #expect(started == .init(data: custom, isCustom: true))
+    #expect(finished == .init(data: ToneSynthesizer.wavData(for: .finished), isCustom: false))
+    #expect(withoutDirectory.isCustom == false)
+}

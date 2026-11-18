@@ -28,10 +28,10 @@ For AI cleanup, turn on Apple Intelligence in System Settings (macOS 26 or newer
 - **Bilingual dictation**: the default prompt is tuned for mixed German/English speech and preserves the spoken language instead of translating. Adjust it in `TranscriptionPromptBuilder.swift` for your own language mix.
 - **Per-app signature**: automatically append a line like "Made with WisprFlow" to dictations in the apps you pick (Slack and WhatsApp are pre-filled), with a hotkey that flips the decision for the next dictation only — on where it would be off, off where it would be on.
 - **Personal dictionary & rules**: teach the transcriber your names and technical terms, and set persistent rules ("never use exclamation marks") that apply to every cleanup and command.
-- **Floating Flow Bar** with live waveform, transcript history, and microphone selection that doesn't touch your system default input (and avoids switching AirPods out of their high-quality playback profile).
+- **Floating Flow Bar** with live waveform, transcript history, and microphone selection that doesn't touch your system default input (and avoids switching AirPods out of their high-quality playback profile). With the lid closed, the built-in microphone is skipped whenever another microphone is connected.
 - **Guarded against accidents**: silent or accidental sub-second recordings are discarded quietly instead of hallucinated into text. Text that comes back in the wrong script is dropped, and a light cleanup that rewords what you said is replaced by your own words.
 - **Dictionary correction without AI**: misheard names are rewritten to the spelling in your dictionary right after transcription ("Flobar" becomes "Flow Bar"). Terms need at least six letters.
-- **Optional sound and haptic feedback**: short tones and a trackpad tap when a dictation starts, ends, is cancelled or fails. Both are off by default and can be turned on under Settings → System. The tones are synthesized in code. The tap is only felt while a finger rests on the trackpad.
+- **Optional sound and haptic feedback**: short tones and a trackpad tap when a dictation starts, ends, is cancelled or fails. Both are off by default and can be turned on under Settings → System. The tones are synthesized in code. To use your own sounds, put `started.wav`, `finished.wav`, `cancelled.wav` or `failed.wav` into `~/Library/Application Support/WisperClone/Sounds` and restart the app. The tap is only felt while a finger rests on the trackpad.
 
 ## Processing engines
 

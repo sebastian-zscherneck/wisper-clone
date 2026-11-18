@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import Foundation
 
 @MainActor
@@ -178,22 +179,28 @@ final class AudioRecorderService: NSObject, AudioRecording, AVCaptureFileOutputR
 
     private func selectedCaptureDevice() throws -> AVCaptureDevice {
         let devices = inputCaptureDevices()
+        let candidates = devices.map { device in
+            InputDeviceCandidate(
+                id: device.uniqueID,
+                isWireless: device.isBluetoothLikeInput || device.isContinuityInput,
+                isBuiltIn: device.isBuiltInInput,
+                isExplicitOnly: device.isContinuityInput
+            )
+        }
+        let pickedID = InputDeviceSelector.pick(
+            from: candidates,
+            selectedID: selectedInputDeviceID,
+            defaultID: AVCaptureDevice.default(for: .audio)?.uniqueID,
+            isLidClosed: LidState.isClosed
+        )
 
-        if let selectedInputDeviceID,
-           let selectedDevice = devices.first(where: { $0.uniqueID == selectedInputDeviceID }) {
-            return selectedDevice
+        if let pickedDevice = devices.first(where: { $0.uniqueID == pickedID }) {
+            return pickedDevice
         }
 
-        if let nonBluetoothDevice = devices.first(where: { !$0.isBluetoothLikeInput }) {
-            return nonBluetoothDevice
-        }
-
+        // The system default can be a device the discovery session does not list.
         if let defaultDevice = AVCaptureDevice.default(for: .audio) {
             return defaultDevice
-        }
-
-        if let firstDevice = devices.first {
-            return firstDevice
         }
 
         throw DictationError.recordingUnavailable
@@ -215,5 +222,15 @@ private extension AVCaptureDevice {
         return normalizedName.contains("airpods")
             || normalizedName.contains("bluetooth")
             || normalizedName.contains("beats")
+    }
+
+    var isBuiltInInput: Bool {
+        transportType == Int32(bitPattern: kAudioDeviceTransportTypeBuiltIn)
+    }
+
+    /// An iPhone used as a microphone.
+    var isContinuityInput: Bool {
+        transportType == Int32(bitPattern: kAudioDeviceTransportTypeContinuityCaptureWired)
+            || transportType == Int32(bitPattern: kAudioDeviceTransportTypeContinuityCaptureWireless)
     }
 }

@@ -19,9 +19,10 @@ final class FlowBarController: NSObject {
             backing: .buffered,
             defer: false
         )
+        // Before `level`: becoming a floating panel resets the level to `.floating`.
+        panel.isFloatingPanel = true
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.isOpaque = false
         panel.backgroundColor = .clear

@@ -143,30 +143,23 @@ struct FlowBarView: View {
 
     // MARK: - Waveform
 
-    /// Ten bars that ripple outward from the centre: the middle bars show the newest
-    /// level, the outer bars the level a few frames ago, scaled down toward the edges.
+    /// Ten bars that ripple outward from the centre and sway while there is sound.
     private var waveform: some View {
-        let levels = barLevels
-        return HStack(spacing: 2.5) {
-            ForEach(0..<Self.barCount, id: \.self) { index in
-                Capsule()
-                    .fill(Color.white)
-                    .frame(width: 2, height: 2 + levels[index] * 12)
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            let levels = WaveformLevels.barLevels(
+                samples: coordinator.audioLevels,
+                barCount: Self.barCount,
+                time: timeline.date.timeIntervalSinceReferenceDate
+            )
+            HStack(spacing: 2.5) {
+                ForEach(0..<Self.barCount, id: \.self) { index in
+                    Capsule()
+                        .fill(Color.white)
+                        .frame(width: 2, height: 2 + levels[index] * 14)
+                }
             }
-        }
-        .frame(height: 16)
-        .animation(.easeOut(duration: 0.1), value: levels)
-    }
-
-    private var barLevels: [CGFloat] {
-        let samples = coordinator.audioLevels
-        let centre = CGFloat(Self.barCount - 1) / 2
-        return (0..<Self.barCount).map { index in
-            let distance = abs(CGFloat(index) - centre)
-            let sampleIndex = samples.count - 1 - Int(distance.rounded(.down)) * 2
-            guard sampleIndex >= 0 else { return 0 }
-            let envelope = 1 - distance / (centre + 1.5)
-            return min(1, CGFloat(samples[sampleIndex]) * 1.8) * envelope
+            .frame(height: 16)
+            .animation(.easeOut(duration: 0.1), value: levels)
         }
     }
 
