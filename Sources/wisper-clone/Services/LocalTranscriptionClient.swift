@@ -60,13 +60,30 @@ actor LocalTranscriptionClient: TranscriptionServicing, LocalModelPreparing {
         let samples: [Float]
         let result: ASRResult
         do {
-            samples = try audioConverter.resampleAudioFile(fileURL)
+            samples = try readSamples(from: fileURL)
             var state = TdtDecoderState.make(decoderLayers: decoderLayers)
             result = try await manager.transcribe(samples, decoderState: &state)
         } catch {
             throw DictationError.transcriptionFailed("Local transcription failed: \(error.localizedDescription)")
         }
         return await boosted(result, samples: samples)
+    }
+
+    /// FluidAudio's reader sometimes returned under 300 ms for recordings of 20+ seconds
+    /// with clear input levels. Then the file is decoded a second time with AVAssetReader
+    /// and the longer result wins.
+    private func readSamples(from fileURL: URL) throws -> [Float] {
+        let minimum = ASRConstants.minimumRequiredSamples(forSampleRate: Int(RecordingDecoder.sampleRate))
+        let primary = try audioConverter.resampleAudioFile(fileURL)
+        guard primary.count < minimum else { return primary }
+
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int) ?? -1
+        let fallback = (try? RecordingDecoder.monoSamples16k(from: fileURL)) ?? []
+        logger.error("""
+            short read: primary=\(primary.count, privacy: .public) fallback=\(fallback.count, privacy: .public) \
+            samples, file=\(bytes, privacy: .public) bytes
+            """)
+        return fallback.count > primary.count ? fallback : primary
     }
 
     // MARK: - Speech model

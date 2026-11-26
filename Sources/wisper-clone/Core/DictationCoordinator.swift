@@ -56,6 +56,7 @@ final class DictationCoordinator: ObservableObject {
     private let historyStore: TranscriptHistoryStoring
     private let selectedTextCapturer: SelectedTextCapturing
     private let feedback: DictationFeedbackProviding
+    private let failedRecordingArchive: FailedRecordingArchive
     private let warmUpConnection: @Sendable () -> Void
     private var pasteTargetApplication: NSRunningApplication?
     private var pasteTargetWindowTitle: String?
@@ -114,6 +115,7 @@ final class DictationCoordinator: ObservableObject {
         historyStore: TranscriptHistoryStoring = FileTranscriptHistoryStore(),
         selectedTextCapturer: SelectedTextCapturing = SelectedTextCapturer(),
         feedback: DictationFeedbackProviding? = nil,
+        failedRecordingArchive: FailedRecordingArchive = FailedRecordingArchive(directory: FailedRecordingArchive.defaultDirectory),
         warmUpConnection: @escaping @Sendable () -> Void = { OpenAITranscriptionClient.warmUpConnection() }
     ) {
         self.audioRecorder = audioRecorder
@@ -133,6 +135,7 @@ final class DictationCoordinator: ObservableObject {
         self.historyStore = historyStore
         self.selectedTextCapturer = selectedTextCapturer
         self.feedback = feedback ?? DictationFeedback()
+        self.failedRecordingArchive = failedRecordingArchive
         self.warmUpConnection = warmUpConnection
 
         dictionaryTerms = personalDictionaryStore.loadTerms()
@@ -706,8 +709,11 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func transcribeAndPaste(fileURL: URL, stopDuration: Duration) async {
+        var keepRecording = false
         defer {
-            try? FileManager.default.removeItem(at: fileURL)
+            if !keepRecording {
+                try? FileManager.default.removeItem(at: fileURL)
+            }
         }
         let clock = ContinuousClock()
 
@@ -720,13 +726,22 @@ final class DictationCoordinator: ObservableObject {
 
             let transcribeStart = clock.now
             let prompt = transcriptionPrompt()
-            let rawText = try await engine.transcriber.transcribe(
-                fileURL: fileURL,
-                apiKey: engine.apiKey,
-                model: preferences.transcriptionQuality.modelName,
-                prompt: prompt,
-                language: preferences.languageMode.apiLanguageCode
-            )
+            let rawText: String
+            do {
+                rawText = try await engine.transcriber.transcribe(
+                    fileURL: fileURL,
+                    apiKey: engine.apiKey,
+                    model: preferences.transcriptionQuality.modelName,
+                    prompt: prompt,
+                    language: preferences.languageMode.apiLanguageCode
+                )
+            } catch {
+                // A failed transcription must not throw away a long dictation.
+                keepRecording = true
+                let kept = failedRecordingArchive.preserve(fileURL) ?? fileURL
+                logger.error("recording kept at \(kept.path, privacy: .public)")
+                throw error
+            }
             let transcribeDuration = clock.now - transcribeStart
 
             let isLocal = preferences.engine == .local

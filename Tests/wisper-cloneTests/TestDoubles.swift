@@ -288,7 +288,11 @@ func makeCoordinator(
     personalRulesStore: PersonalRulesStore = PersonalRulesStore(defaults: UserDefaults(suiteName: "wisper-clone-test-rules-\(UUID().uuidString)")!),
     personalDictionaryStore: PersonalDictionaryStore = PersonalDictionaryStore(defaults: UserDefaults(suiteName: "wisper-clone-test-dictionary-\(UUID().uuidString)")!),
     engine: ProcessingEngine = .openAI,
-    feedback: SpyFeedback = SpyFeedback()
+    feedback: SpyFeedback = SpyFeedback(),
+    // Never let tests move recordings into the real Application Support folder.
+    failedRecordingArchive: FailedRecordingArchive = FailedRecordingArchive(
+        directory: FileManager.default.temporaryDirectory.appendingPathComponent("wisper-clone-test-failed-\(UUID().uuidString)")
+    )
 ) -> DictationCoordinator {
     // Existing flow tests exercise the OpenAI engine (API key handling included). The same
     // spies also stand in for the local engine so a test can switch engines.
@@ -312,6 +316,7 @@ func makeCoordinator(
         historyStore: historyStore,
         selectedTextCapturer: selectedTextCapturer,
         feedback: feedback,
+        failedRecordingArchive: failedRecordingArchive,
         warmUpConnection: {} // no-op in tests: never hit the real network
     )
     // Flow tests start and finish recordings within milliseconds; disable the
